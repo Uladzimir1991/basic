@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { httpServer } from '../src';
+import { httpServer } from '../src/index.js';
 
 afterAll(async () => {
   await httpServer.close();

@@ -1,22 +1,29 @@
+import { HttpError } from 'koa';
+
 export class DatabaseService {
   /**
-   * @param {import('mysql2/promise').Pool} pool
-   */
+     * @param {Pool} pool
+     */
   constructor(pool) {
     this.pool = pool;
   }
 
   /**
-   * @returns {Promise<import('mysql2/promise').Connection>}
-   */
+     * @returns {Promise<import('mysql2/promise').Connection>}
+     */
   async getConnection() {
-    return this.pool.getConnection();
+    try {
+      return await this.pool.getConnection();
+    } catch (error) {
+      console.error('Ошибка при получении соединения с базой данных:', error);
+      throw new HttpError('500');
+    }
   }
 
   /**
-   * @param { Function } callback
-   * @returns {Promise<any>}
-   */
+     * @param { Function } callback
+     * @returns {Promise<any>}
+     */
   async transaction(callback) {
     const connection = await this.getConnection();
     let result = null;
