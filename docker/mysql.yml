@@ -12,6 +12,7 @@ services:
       interval: 1s
       timeout: 30s
       retries: 30
+    restart: unless-stopped
     volumes:
       - ../test/db:/docker-entrypoint-initdb.d
     ports:
