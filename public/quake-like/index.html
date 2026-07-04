@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Arena Protocol</title>
+    <link rel="stylesheet" href="/game/styles.css">
+  </head>
+  <body>
+    <main class="game-shell">
+      <section class="hero-panel" aria-label="Описание игры">
+        <p class="eyebrow">Локальный arena shooter prototype</p>
+        <h1>Arena Protocol</h1>
+        <p class="description">
+          Быстрый deathmatch-прототип в духе классических arena shooters: стрейф, прыжок,
+          ракетный урон по области, боты, здоровье, броня и боеприпасы.
+        </p>
+      </section>
+      <section class="viewport-panel" aria-label="Игровой экран">
+        <canvas id="game-canvas" width="1280" height="720"></canvas>
+        <div class="hud">
+          <div>
+            <span>HP</span>
+            <strong id="health-value">100</strong>
+          </div>
+          <div>
+            <span>Armor</span>
+            <strong id="armor-value">50</strong>
+          </div>
+          <div>
+            <span>Ammo</span>
+            <strong id="ammo-value">24</strong>
+          </div>
+          <div>
+            <span>Score</span>
+            <strong id="score-value">0</strong>
+          </div>
+        </div>
+        <button id="start-button" class="start-button" type="button">Войти на арену</button>
+        <div id="message-panel" class="message-panel">Нажмите кнопку и разрешите захват мыши</div>
+      </section>
+      <section class="controls-panel" aria-label="Управление">
+        <h2>Управление</h2>
+        <ul>
+          <li><kbd>WASD</kbd> движение и стрейф</li>
+          <li><kbd>Mouse</kbd> обзор</li>
+          <li><kbd>ЛКМ</kbd> выстрел</li>
+          <li><kbd>Space</kbd> прыжок</li>
+          <li><kbd>Shift</kbd> ускорение</li>
+          <li><kbd>R</kbd> сброс матча</li>
+        </ul>
+      </section>
+    </main>
+    <script src="/game/game.js" type="module"></script>
+  </body>
+</html>
