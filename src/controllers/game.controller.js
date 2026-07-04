@@ -7,6 +7,7 @@ const gameDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 const indexFileName = 'index.html';
 const notFoundStatusCode = 404;
 const forbiddenStatusCode = 403;
+const allowedMethods = new Set(['GET', 'HEAD']);
 
 /**
  * Serves the local arena shooter prototype.
@@ -26,7 +27,7 @@ export async function GameController(ctx, next) {
   if (!isGameRequest({ requestPath: ctx.path })) {
     return next();
   }
-  if (ctx.method !== 'GET') {
+  if (!allowedMethods.has(ctx.method)) {
     ctx.status = notFoundStatusCode;
     return;
   }
