@@ -55,6 +55,8 @@ const pickups = createPickups();
 const player = {
   x: 2.3,
   y: 2.4,
+  velocityX: 0,
+  velocityY: 0,
   angle: 0,
   velocityZ: 0,
   heightOffset: 0,
@@ -62,6 +64,7 @@ const player = {
   armor: 50,
   ammo: 24,
   score: 0,
+  weaponKick: 0,
 };
 let bots = createBots();
 let rockets = [];
@@ -75,17 +78,23 @@ const rayStep = 1;
 const maxRayDistance = 16;
 const mouseSensitivity = 0.0024;
 const touchLookSensitivity = 0.0052;
-const walkSpeed = 3.2;
-const runMultiplier = 1.45;
-const rocketSpeed = 8.4;
-const rocketDamage = 62;
-const rocketSplashRadius = 1.35;
-const shotCooldown = 260;
+const walkSpeed = 4.2;
+const runMultiplier = 1.35;
+const groundAcceleration = 24;
+const airAcceleration = 7.5;
+const groundFriction = 8.5;
+const airFriction = 0.25;
+const maxAirSpeed = 6.8;
+const rocketSpeed = 10.8;
+const rocketDamage = 74;
+const rocketSplashRadius = 1.55;
+const rocketKnockback = 7.8;
+const shotCooldown = 430;
 const pickupRespawnTime = 7000;
 const botSpeed = 1.25;
 const botTouchDamage = 18;
 const gravity = 13;
-const jumpVelocity = 5.2;
+const jumpVelocity = 5.65;
 const wallPadding = 0.18;
 const stickRadius = 68;
 const textureGridSize = 0.18;
@@ -382,32 +391,85 @@ function updateTouchFire() {
  */
 function updatePlayer(deltaTime) {
   const isRunning = keys.has('ShiftLeft') || keys.has('ShiftRight') || touchControls.isRunning;
-  const speed = isRunning ? walkSpeed * runMultiplier : walkSpeed;
+  const maxSpeed = isRunning ? walkSpeed * runMultiplier : walkSpeed;
   const forward = clampAxis(getAxis('KeyW', 'KeyS') + touchControls.forward);
   const strafe = clampAxis(getAxis('KeyD', 'KeyA') + touchControls.strafe);
-  const movement = getMovementVector({ forward, strafe, speed, deltaTime });
-  moveEntity({ entity: player, deltaX: movement.x, deltaY: movement.y });
+  const isGrounded = player.heightOffset === 0;
+  const wishMove = getWishMove({ forward, strafe });
+  applyHorizontalFriction({ deltaTime, isGrounded });
+  acceleratePlayer({ wishMove, maxSpeed, deltaTime, isGrounded });
+  limitAirSpeed({ isGrounded });
+  moveEntity({ entity: player, deltaX: player.velocityX * deltaTime, deltaY: player.velocityY * deltaTime });
   player.velocityZ -= gravity * deltaTime;
   player.heightOffset = Math.max(0, player.heightOffset + player.velocityZ * deltaTime);
   if (player.heightOffset === 0) {
     player.velocityZ = 0;
   }
+  player.weaponKick = Math.max(0, player.weaponKick - deltaTime * 6);
 }
 
 /**
- * @param {{ forward: number, strafe: number, speed: number, deltaTime: number }} params
- * @returns {{ x: number, y: number }}
+ * @param {{ forward: number, strafe: number }} params
+ * @returns {{ x: number, y: number, length: number }}
  */
-function getMovementVector({ forward, strafe, speed, deltaTime }) {
+function getWishMove({ forward, strafe }) {
   const length = Math.hypot(forward, strafe) || 1;
   const normalizedForward = forward / length;
   const normalizedStrafe = strafe / length;
   const cos = Math.cos(player.angle);
   const sin = Math.sin(player.angle);
   return {
-    x: (cos * normalizedForward - sin * normalizedStrafe) * speed * deltaTime,
-    y: (sin * normalizedForward + cos * normalizedStrafe) * speed * deltaTime,
+    x: cos * normalizedForward - sin * normalizedStrafe,
+    y: sin * normalizedForward + cos * normalizedStrafe,
+    length: Math.min(1, Math.hypot(forward, strafe)),
   };
+}
+
+/**
+ * @param {{ deltaTime: number, isGrounded: boolean }} params
+ * @returns {void}
+ */
+function applyHorizontalFriction({ deltaTime, isGrounded }) {
+  const friction = isGrounded ? groundFriction : airFriction;
+  const speed = Math.hypot(player.velocityX, player.velocityY);
+  if (speed <= 0.01) {
+    player.velocityX = 0;
+    player.velocityY = 0;
+    return;
+  }
+  const nextSpeed = Math.max(0, speed - speed * friction * deltaTime);
+  player.velocityX *= nextSpeed / speed;
+  player.velocityY *= nextSpeed / speed;
+}
+
+/**
+ * @param {{ wishMove: { x: number, y: number, length: number }, maxSpeed: number, deltaTime: number, isGrounded: boolean }} params
+ * @returns {void}
+ */
+function acceleratePlayer({ wishMove, maxSpeed, deltaTime, isGrounded }) {
+  if (wishMove.length <= 0) {
+    return;
+  }
+  const acceleration = isGrounded ? groundAcceleration : airAcceleration;
+  const wishSpeed = maxSpeed * wishMove.length;
+  const currentSpeed = player.velocityX * wishMove.x + player.velocityY * wishMove.y;
+  const addSpeed = Math.max(0, wishSpeed - currentSpeed);
+  const accelerationSpeed = Math.min(addSpeed, acceleration * wishSpeed * deltaTime);
+  player.velocityX += wishMove.x * accelerationSpeed;
+  player.velocityY += wishMove.y * accelerationSpeed;
+}
+
+/**
+ * @param {{ isGrounded: boolean }} params
+ * @returns {void}
+ */
+function limitAirSpeed({ isGrounded }) {
+  const speed = Math.hypot(player.velocityX, player.velocityY);
+  if (isGrounded || speed <= maxAirSpeed) {
+    return;
+  }
+  player.velocityX *= maxAirSpeed / speed;
+  player.velocityY *= maxAirSpeed / speed;
 }
 
 /**
@@ -435,6 +497,7 @@ function jumpPlayer() {
     return;
   }
   player.velocityZ = jumpVelocity;
+  applyHorizontalFriction({ deltaTime: 0.018, isGrounded: false });
 }
 
 /**
@@ -447,11 +510,12 @@ function shootRocket() {
   }
   player.ammo -= 1;
   lastShotAt = now;
+  player.weaponKick = 1;
   rockets.push({
     x: player.x + Math.cos(player.angle) * 0.45,
     y: player.y + Math.sin(player.angle) * 0.45,
     angle: player.angle,
-    life: 1.8,
+    life: 2,
     owner: 'player',
   });
   createParticles({ x: player.x, y: player.y, color: '#ffd166', amount: 8 });
@@ -491,9 +555,11 @@ function hitBot(rocket) {
  * @returns {void}
  */
 function explodeRocket(rocket) {
-  createParticles({ x: rocket.x, y: rocket.y, color: '#ff7a18', amount: 22 });
+  createParticles({ x: rocket.x, y: rocket.y, color: '#ff7a18', amount: 34 });
+  createParticles({ x: rocket.x, y: rocket.y, color: '#45d6ff', amount: 12 });
   damageBots({ x: rocket.x, y: rocket.y, owner: rocket.owner });
   damagePlayer({ x: rocket.x, y: rocket.y, owner: rocket.owner });
+  applyRocketImpulse({ x: rocket.x, y: rocket.y });
 }
 
 /**
@@ -533,6 +599,24 @@ function damagePlayer({ x, y, owner }) {
   }
   const damage = Math.round(rocketDamage * (1 - distance / rocketSplashRadius));
   applyPlayerDamage(damage);
+}
+
+/**
+ * @param {{ x: number, y: number }} params
+ * @returns {void}
+ */
+function applyRocketImpulse({ x, y }) {
+  const distance = getDistance({ ax: x, ay: y, bx: player.x, by: player.y });
+  if (distance > rocketSplashRadius) {
+    return;
+  }
+  const force = rocketKnockback * (1 - distance / rocketSplashRadius);
+  const directionX = player.x - x;
+  const directionY = player.y - y;
+  const directionLength = Math.hypot(directionX, directionY) || 1;
+  player.velocityX += (directionX / directionLength) * force;
+  player.velocityY += (directionY / directionLength) * force;
+  player.velocityZ = Math.max(player.velocityZ, jumpVelocity * 0.55 + force * 0.42);
 }
 
 /**
@@ -830,7 +914,7 @@ function drawSprite({ sprite, width, height, depthBuffer }) {
     return;
   }
   if (sprite.spriteType === 'pickup') {
-    drawPickupSprite({ screenX, spriteTop, screenSize, color: sprite.color });
+    drawPickupSprite({ screenX, spriteTop, screenSize, color: sprite.color, type: sprite.type });
     return;
   }
   context.beginPath();
@@ -845,17 +929,35 @@ function drawSprite({ sprite, width, height, depthBuffer }) {
 function drawBotSprite({ screenX, spriteTop, screenSize, color }) {
   context.fillStyle = 'rgb(0 0 0 / 38%)';
   context.fillRect(screenX - screenSize * 0.36, spriteTop + screenSize * 0.86, screenSize * 0.72, screenSize * 0.09);
+  context.fillStyle = '#111827';
+  context.fillRect(screenX - screenSize * 0.52, spriteTop + screenSize * 0.28, screenSize * 0.18, screenSize * 0.22);
+  context.fillRect(screenX + screenSize * 0.34, spriteTop + screenSize * 0.28, screenSize * 0.18, screenSize * 0.22);
   context.fillStyle = color;
-  context.fillRect(screenX - screenSize * 0.32, spriteTop + screenSize * 0.22, screenSize * 0.64, screenSize * 0.56);
+  context.beginPath();
+  context.moveTo(screenX - screenSize * 0.34, spriteTop + screenSize * 0.24);
+  context.lineTo(screenX + screenSize * 0.34, spriteTop + screenSize * 0.24);
+  context.lineTo(screenX + screenSize * 0.24, spriteTop + screenSize * 0.78);
+  context.lineTo(screenX - screenSize * 0.24, spriteTop + screenSize * 0.78);
+  context.closePath();
+  context.fill();
   context.fillStyle = '#20283a';
   context.fillRect(screenX - screenSize * 0.24, spriteTop + screenSize * 0.34, screenSize * 0.48, screenSize * 0.18);
   context.fillStyle = '#d7e4f2';
-  context.fillRect(screenX - screenSize * 0.22, spriteTop, screenSize * 0.44, screenSize * 0.3);
+  context.beginPath();
+  context.moveTo(screenX - screenSize * 0.22, spriteTop + screenSize * 0.04);
+  context.lineTo(screenX + screenSize * 0.22, spriteTop + screenSize * 0.04);
+  context.lineTo(screenX + screenSize * 0.18, spriteTop + screenSize * 0.3);
+  context.lineTo(screenX - screenSize * 0.18, spriteTop + screenSize * 0.3);
+  context.closePath();
+  context.fill();
   context.fillStyle = '#45d6ff';
   context.fillRect(screenX - screenSize * 0.16, spriteTop + screenSize * 0.11, screenSize * 0.32, screenSize * 0.055);
   context.fillStyle = '#111827';
   context.fillRect(screenX - screenSize * 0.39, spriteTop + screenSize * 0.43, screenSize * 0.12, screenSize * 0.33);
   context.fillRect(screenX + screenSize * 0.27, spriteTop + screenSize * 0.43, screenSize * 0.12, screenSize * 0.33);
+  context.fillStyle = '#0b101c';
+  context.fillRect(screenX - screenSize * 0.22, spriteTop + screenSize * 0.78, screenSize * 0.14, screenSize * 0.16);
+  context.fillRect(screenX + screenSize * 0.08, spriteTop + screenSize * 0.78, screenSize * 0.14, screenSize * 0.16);
 }
 
 /**
@@ -864,30 +966,50 @@ function drawBotSprite({ screenX, spriteTop, screenSize, color }) {
  */
 function drawRocketSprite({ screenX, spriteTop, screenSize }) {
   const centerY = spriteTop + screenSize * 0.5;
-  context.fillStyle = 'rgb(255 122 24 / 24%)';
+  context.fillStyle = 'rgb(255 122 24 / 34%)';
   context.beginPath();
-  context.arc(screenX, centerY, screenSize * 1.4, 0, Math.PI * 2);
+  context.arc(screenX, centerY, screenSize * 1.75, 0, Math.PI * 2);
   context.fill();
+  context.fillStyle = 'rgb(255 209 102 / 42%)';
+  context.fillRect(screenX - screenSize * 1.6, centerY - screenSize * 0.18, screenSize * 1.4, screenSize * 0.36);
   context.fillStyle = '#ffd166';
   context.beginPath();
-  context.arc(screenX, centerY, screenSize * 0.52, 0, Math.PI * 2);
+  context.arc(screenX, centerY, screenSize * 0.62, 0, Math.PI * 2);
+  context.fill();
+  context.fillStyle = '#f5f7fb';
+  context.beginPath();
+  context.arc(screenX + screenSize * 0.12, centerY - screenSize * 0.08, screenSize * 0.22, 0, Math.PI * 2);
   context.fill();
 }
 
 /**
- * @param {{ screenX: number, spriteTop: number, screenSize: number, color: string }} params
+ * @param {{ screenX: number, spriteTop: number, screenSize: number, color: string, type: string }} params
  * @returns {void}
  */
-function drawPickupSprite({ screenX, spriteTop, screenSize, color }) {
+function drawPickupSprite({ screenX, spriteTop, screenSize, color, type }) {
   const centerY = spriteTop + screenSize * 0.5;
+  context.fillStyle = `${color}33`;
+  context.beginPath();
+  context.arc(screenX, centerY, screenSize * 0.78, 0, Math.PI * 2);
+  context.fill();
   context.strokeStyle = color;
   context.lineWidth = Math.max(2, screenSize * 0.08);
   context.beginPath();
   context.arc(screenX, centerY, screenSize * 0.5, 0, Math.PI * 2);
   context.stroke();
   context.fillStyle = color;
-  context.fillRect(screenX - screenSize * 0.12, centerY - screenSize * 0.35, screenSize * 0.24, screenSize * 0.7);
-  context.fillRect(screenX - screenSize * 0.35, centerY - screenSize * 0.12, screenSize * 0.7, screenSize * 0.24);
+  if (type === 'health') {
+    context.fillRect(screenX - screenSize * 0.12, centerY - screenSize * 0.35, screenSize * 0.24, screenSize * 0.7);
+    context.fillRect(screenX - screenSize * 0.35, centerY - screenSize * 0.12, screenSize * 0.7, screenSize * 0.24);
+    return;
+  }
+  context.beginPath();
+  context.moveTo(screenX, centerY - screenSize * 0.42);
+  context.lineTo(screenX + screenSize * 0.32, centerY);
+  context.lineTo(screenX, centerY + screenSize * 0.42);
+  context.lineTo(screenX - screenSize * 0.32, centerY);
+  context.closePath();
+  context.fill();
 }
 
 /**
@@ -895,23 +1017,33 @@ function drawPickupSprite({ screenX, spriteTop, screenSize, color }) {
  * @returns {void}
  */
 function drawWeapon({ width, height }) {
-  const weaponGradient = context.createLinearGradient(width * 0.54, height * 0.58, width * 0.82, height * 0.84);
+  const kickOffset = player.weaponKick * height * 0.035;
+  const weaponGradient = context.createLinearGradient(width * 0.52, height * 0.57 + kickOffset, width * 0.86, height * 0.88 + kickOffset);
   weaponGradient.addColorStop(0, '#3a4358');
   weaponGradient.addColorStop(0.45, '#111827');
   weaponGradient.addColorStop(1, '#05060a');
   context.fillStyle = weaponGradient;
   context.beginPath();
-  context.moveTo(width * 0.55, height * 0.78);
-  context.lineTo(width * 0.63, height * 0.62);
-  context.lineTo(width * 0.78, height * 0.65);
-  context.lineTo(width * 0.83, height * 0.78);
-  context.lineTo(width * 0.72, height * 0.88);
+  context.moveTo(width * 0.52, height * 0.8 + kickOffset);
+  context.lineTo(width * 0.61, height * 0.61 + kickOffset);
+  context.lineTo(width * 0.8, height * 0.62 + kickOffset);
+  context.lineTo(width * 0.88, height * 0.78 + kickOffset);
+  context.lineTo(width * 0.74, height * 0.9 + kickOffset);
   context.closePath();
   context.fill();
+  context.fillStyle = '#0b101c';
+  context.fillRect(width * 0.72, height * 0.68 + kickOffset, width * 0.14, height * 0.07);
   context.fillStyle = '#ff7a18';
-  context.fillRect(width * 0.73, height * 0.68, width * 0.075, height * 0.035);
+  context.fillRect(width * 0.76, height * 0.695 + kickOffset, width * 0.08, height * 0.032);
   context.fillStyle = '#45d6ff';
-  context.fillRect(width * 0.62, height * 0.68, width * 0.09, height * 0.018);
+  context.fillRect(width * 0.61, height * 0.68 + kickOffset, width * 0.11, height * 0.018);
+  if (player.weaponKick <= 0) {
+    return;
+  }
+  context.fillStyle = `rgb(255 209 102 / ${Math.min(0.7, player.weaponKick)})`;
+  context.beginPath();
+  context.arc(width * 0.85, height * 0.71 + kickOffset, width * 0.035 * player.weaponKick, 0, Math.PI * 2);
+  context.fill();
 }
 
 /**
@@ -974,9 +1106,13 @@ function moveEntity({ entity, deltaX, deltaY }) {
   const nextY = entity.y + deltaY;
   if (!isWall({ x: nextX + Math.sign(deltaX) * wallPadding, y: entity.y })) {
     entity.x = nextX;
+  } else if (entity === player) {
+    player.velocityX = 0;
   }
   if (!isWall({ x: entity.x, y: nextY + Math.sign(deltaY) * wallPadding })) {
     entity.y = nextY;
+  } else if (entity === player) {
+    player.velocityY = 0;
   }
 }
 
