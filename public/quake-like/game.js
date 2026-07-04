@@ -46,6 +46,7 @@ const touchControls = {
   forward: 0,
   strafe: 0,
   isRunning: false,
+  isFiring: false,
   movePointerId: null,
   lookPointerId: null,
   lookX: 0,
@@ -70,10 +71,10 @@ let lastShotAt = 0;
 let isStarted = false;
 const tileSize = 1;
 const fieldOfView = Math.PI / 3;
-const rayStep = 2;
+const rayStep = 1;
 const maxRayDistance = 16;
 const mouseSensitivity = 0.0024;
-const touchLookSensitivity = 0.007;
+const touchLookSensitivity = 0.0052;
 const walkSpeed = 3.2;
 const runMultiplier = 1.45;
 const rocketSpeed = 8.4;
@@ -86,7 +87,9 @@ const botTouchDamage = 18;
 const gravity = 13;
 const jumpVelocity = 5.2;
 const wallPadding = 0.18;
-const stickRadius = 58;
+const stickRadius = 68;
+const textureGridSize = 0.18;
+const emissiveBandHeight = 0.08;
 
 startButton.addEventListener('click', startGame);
 window.addEventListener('keydown', handleKeyDown);
@@ -103,6 +106,8 @@ lookPad.addEventListener('pointermove', handleLookChange);
 lookPad.addEventListener('pointerup', resetLookPad);
 lookPad.addEventListener('pointercancel', resetLookPad);
 fireButton.addEventListener('pointerdown', handleFireTouch);
+fireButton.addEventListener('pointerup', stopFireTouch);
+fireButton.addEventListener('pointercancel', stopFireTouch);
 jumpButton.addEventListener('pointerdown', handleJumpTouch);
 runButton.addEventListener('pointerdown', toggleRunTouch);
 resetButton.addEventListener('pointerdown', handleResetTouch);
@@ -266,7 +271,19 @@ function resetLookPad(event) {
 function handleFireTouch(event) {
   event.preventDefault();
   startGameFromTouch();
+  touchControls.isFiring = true;
+  fireButton.classList.add('is-active');
   shootRocket();
+}
+
+/**
+ * @param {PointerEvent} event
+ * @returns {void}
+ */
+function stopFireTouch(event) {
+  event.preventDefault();
+  touchControls.isFiring = false;
+  fireButton.classList.remove('is-active');
 }
 
 /**
@@ -341,11 +358,22 @@ function loop(frameTime) {
  */
 function updateGame(deltaTime) {
   updatePlayer(deltaTime);
+  updateTouchFire();
   updateRockets(deltaTime);
   updateBots(deltaTime);
   updateParticles(deltaTime);
   updatePickups();
   updateHud();
+}
+
+/**
+ * @returns {void}
+ */
+function updateTouchFire() {
+  if (!touchControls.isFiring) {
+    return;
+  }
+  shootRocket();
 }
 
 /**
@@ -611,6 +639,7 @@ function renderGame() {
   drawWeapon({ width, height });
   drawCrosshair({ width, height });
   drawMiniMap();
+  drawVignette({ width, height });
 }
 
 /**
@@ -620,15 +649,19 @@ function renderGame() {
 function drawBackground({ width, height }) {
   const horizon = height * 0.48 - player.heightOffset * 16;
   const skyGradient = context.createLinearGradient(0, 0, 0, horizon);
-  skyGradient.addColorStop(0, '#07111f');
-  skyGradient.addColorStop(1, '#17213a');
+  skyGradient.addColorStop(0, '#060711');
+  skyGradient.addColorStop(0.46, '#11162a');
+  skyGradient.addColorStop(1, '#2a1c18');
   context.fillStyle = skyGradient;
   context.fillRect(0, 0, width, horizon);
   const floorGradient = context.createLinearGradient(0, horizon, 0, height);
-  floorGradient.addColorStop(0, '#191b22');
-  floorGradient.addColorStop(1, '#070910');
+  floorGradient.addColorStop(0, '#2a211d');
+  floorGradient.addColorStop(0.55, '#141821');
+  floorGradient.addColorStop(1, '#05060a');
   context.fillStyle = floorGradient;
   context.fillRect(0, horizon, width, height - horizon);
+  drawFloorGrid({ width, height, horizon });
+  drawCeilingLights({ width, horizon });
 }
 
 /**
@@ -644,8 +677,7 @@ function drawWalls({ width, height }) {
     const wallHeight = Math.min(height * 1.8, height / Math.max(correctedDistance, 0.12));
     const shade = Math.max(0.22, 1 - correctedDistance / maxRayDistance);
     const top = height * 0.5 - wallHeight * 0.5 - player.heightOffset * 16;
-    context.fillStyle = getShadedColor({ color: wallColorByType[hit.tile] || '#2f3345', shade });
-    context.fillRect(column, top, rayStep + 1, wallHeight);
+    drawWallColumn({ column, top, wallHeight, shade, hit });
     depthBuffer[column] = correctedDistance;
     depthBuffer[column + 1] = correctedDistance;
   }
@@ -654,7 +686,7 @@ function drawWalls({ width, height }) {
 
 /**
  * @param {{ angle: number }} params
- * @returns {{ distance: number, tile: string }}
+ * @returns {{ distance: number, tile: string, x: number, y: number }}
  */
 function castRay({ angle }) {
   const step = 0.035;
@@ -662,10 +694,89 @@ function castRay({ angle }) {
     const x = player.x + Math.cos(angle) * distance;
     const y = player.y + Math.sin(angle) * distance;
     if (isWall({ x, y })) {
-      return { distance, tile: getMapTile({ x, y }) };
+      return { distance, tile: getMapTile({ x, y }), x, y };
     }
   }
-  return { distance: maxRayDistance, tile: '#' };
+  return { distance: maxRayDistance, tile: '#', x: player.x, y: player.y };
+}
+
+/**
+ * @param {{ column: number, top: number, wallHeight: number, shade: number, hit: { tile: string, x: number, y: number } }} params
+ * @returns {void}
+ */
+function drawWallColumn({ column, top, wallHeight, shade, hit }) {
+  const baseColor = wallColorByType[hit.tile] || '#2f3345';
+  const textureOffset = getWallTextureOffset({ x: hit.x, y: hit.y });
+  const panelLine = textureOffset % textureGridSize < 0.018;
+  const emissiveLine = textureOffset > 0.46 && textureOffset < 0.46 + emissiveBandHeight;
+  const color = panelLine ? '#111827' : baseColor;
+  context.fillStyle = getShadedColor({ color, shade });
+  context.fillRect(column, top, rayStep + 1, wallHeight);
+  if (emissiveLine) {
+    context.fillStyle = getShadedColor({ color: '#ff7a18', shade: Math.min(1, shade + 0.35) });
+    context.fillRect(column, top + wallHeight * 0.36, rayStep + 1, Math.max(2, wallHeight * 0.08));
+  }
+  if (panelLine) {
+    context.fillStyle = getShadedColor({ color: '#45d6ff', shade: Math.min(0.75, shade + 0.2) });
+    context.fillRect(column, top, rayStep + 1, Math.max(1, wallHeight * 0.025));
+  }
+}
+
+/**
+ * @param {{ x: number, y: number }} params
+ * @returns {number}
+ */
+function getWallTextureOffset({ x, y }) {
+  const xFraction = Math.abs(x - Math.floor(x));
+  const yFraction = Math.abs(y - Math.floor(y));
+  return Math.min(xFraction, 1 - xFraction) < Math.min(yFraction, 1 - yFraction) ? yFraction : xFraction;
+}
+
+/**
+ * @param {{ width: number, height: number, horizon: number }} params
+ * @returns {void}
+ */
+function drawFloorGrid({ width, height, horizon }) {
+  context.strokeStyle = 'rgb(255 122 24 / 18%)';
+  context.lineWidth = 1;
+  for (let i = 1; i < 14; i += 1) {
+    const y = horizon + ((height - horizon) * i * i) / 196;
+    context.beginPath();
+    context.moveTo(0, y);
+    context.lineTo(width, y);
+    context.stroke();
+  }
+  for (let i = -8; i <= 8; i += 1) {
+    const x = width * 0.5 + i * width * 0.08;
+    context.beginPath();
+    context.moveTo(width * 0.5, horizon);
+    context.lineTo(x, height);
+    context.stroke();
+  }
+}
+
+/**
+ * @param {{ width: number, horizon: number }} params
+ * @returns {void}
+ */
+function drawCeilingLights({ width, horizon }) {
+  context.fillStyle = 'rgb(69 214 255 / 18%)';
+  for (let i = 0; i < 6; i += 1) {
+    const x = width * (0.12 + i * 0.16);
+    context.fillRect(x, Math.max(12, horizon * 0.16), width * 0.07, 3);
+  }
+}
+
+/**
+ * @param {{ width: number, height: number }} params
+ * @returns {void}
+ */
+function drawVignette({ width, height }) {
+  const gradient = context.createRadialGradient(width * 0.5, height * 0.5, height * 0.2, width * 0.5, height * 0.5, height * 0.72);
+  gradient.addColorStop(0, 'rgb(0 0 0 / 0%)');
+  gradient.addColorStop(1, 'rgb(0 0 0 / 52%)');
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, width, height);
 }
 
 /**
@@ -714,6 +825,14 @@ function drawSprite({ sprite, width, height, depthBuffer }) {
     drawBotSprite({ screenX, spriteTop, screenSize, color: sprite.color });
     return;
   }
+  if (sprite.spriteType === 'rocket') {
+    drawRocketSprite({ screenX, spriteTop, screenSize });
+    return;
+  }
+  if (sprite.spriteType === 'pickup') {
+    drawPickupSprite({ screenX, spriteTop, screenSize, color: sprite.color });
+    return;
+  }
   context.beginPath();
   context.arc(screenX, spriteTop + screenSize * 0.5, screenSize * 0.5, 0, Math.PI * 2);
   context.fill();
@@ -724,13 +843,51 @@ function drawSprite({ sprite, width, height, depthBuffer }) {
  * @returns {void}
  */
 function drawBotSprite({ screenX, spriteTop, screenSize, color }) {
+  context.fillStyle = 'rgb(0 0 0 / 38%)';
+  context.fillRect(screenX - screenSize * 0.36, spriteTop + screenSize * 0.86, screenSize * 0.72, screenSize * 0.09);
   context.fillStyle = color;
-  context.fillRect(screenX - screenSize * 0.28, spriteTop + screenSize * 0.2, screenSize * 0.56, screenSize * 0.65);
-  context.fillStyle = '#f5f7fb';
-  context.fillRect(screenX - screenSize * 0.2, spriteTop, screenSize * 0.4, screenSize * 0.28);
+  context.fillRect(screenX - screenSize * 0.32, spriteTop + screenSize * 0.22, screenSize * 0.64, screenSize * 0.56);
+  context.fillStyle = '#20283a';
+  context.fillRect(screenX - screenSize * 0.24, spriteTop + screenSize * 0.34, screenSize * 0.48, screenSize * 0.18);
+  context.fillStyle = '#d7e4f2';
+  context.fillRect(screenX - screenSize * 0.22, spriteTop, screenSize * 0.44, screenSize * 0.3);
+  context.fillStyle = '#45d6ff';
+  context.fillRect(screenX - screenSize * 0.16, spriteTop + screenSize * 0.11, screenSize * 0.32, screenSize * 0.055);
   context.fillStyle = '#111827';
-  context.fillRect(screenX - screenSize * 0.13, spriteTop + screenSize * 0.09, screenSize * 0.08, screenSize * 0.06);
-  context.fillRect(screenX + screenSize * 0.05, spriteTop + screenSize * 0.09, screenSize * 0.08, screenSize * 0.06);
+  context.fillRect(screenX - screenSize * 0.39, spriteTop + screenSize * 0.43, screenSize * 0.12, screenSize * 0.33);
+  context.fillRect(screenX + screenSize * 0.27, spriteTop + screenSize * 0.43, screenSize * 0.12, screenSize * 0.33);
+}
+
+/**
+ * @param {{ screenX: number, spriteTop: number, screenSize: number }} params
+ * @returns {void}
+ */
+function drawRocketSprite({ screenX, spriteTop, screenSize }) {
+  const centerY = spriteTop + screenSize * 0.5;
+  context.fillStyle = 'rgb(255 122 24 / 24%)';
+  context.beginPath();
+  context.arc(screenX, centerY, screenSize * 1.4, 0, Math.PI * 2);
+  context.fill();
+  context.fillStyle = '#ffd166';
+  context.beginPath();
+  context.arc(screenX, centerY, screenSize * 0.52, 0, Math.PI * 2);
+  context.fill();
+}
+
+/**
+ * @param {{ screenX: number, spriteTop: number, screenSize: number, color: string }} params
+ * @returns {void}
+ */
+function drawPickupSprite({ screenX, spriteTop, screenSize, color }) {
+  const centerY = spriteTop + screenSize * 0.5;
+  context.strokeStyle = color;
+  context.lineWidth = Math.max(2, screenSize * 0.08);
+  context.beginPath();
+  context.arc(screenX, centerY, screenSize * 0.5, 0, Math.PI * 2);
+  context.stroke();
+  context.fillStyle = color;
+  context.fillRect(screenX - screenSize * 0.12, centerY - screenSize * 0.35, screenSize * 0.24, screenSize * 0.7);
+  context.fillRect(screenX - screenSize * 0.35, centerY - screenSize * 0.12, screenSize * 0.7, screenSize * 0.24);
 }
 
 /**
@@ -738,12 +895,23 @@ function drawBotSprite({ screenX, spriteTop, screenSize, color }) {
  * @returns {void}
  */
 function drawWeapon({ width, height }) {
-  context.fillStyle = '#111827';
-  context.fillRect(width * 0.56, height * 0.68, width * 0.2, height * 0.12);
-  context.fillStyle = '#263044';
-  context.fillRect(width * 0.61, height * 0.62, width * 0.13, height * 0.08);
+  const weaponGradient = context.createLinearGradient(width * 0.54, height * 0.58, width * 0.82, height * 0.84);
+  weaponGradient.addColorStop(0, '#3a4358');
+  weaponGradient.addColorStop(0.45, '#111827');
+  weaponGradient.addColorStop(1, '#05060a');
+  context.fillStyle = weaponGradient;
+  context.beginPath();
+  context.moveTo(width * 0.55, height * 0.78);
+  context.lineTo(width * 0.63, height * 0.62);
+  context.lineTo(width * 0.78, height * 0.65);
+  context.lineTo(width * 0.83, height * 0.78);
+  context.lineTo(width * 0.72, height * 0.88);
+  context.closePath();
+  context.fill();
   context.fillStyle = '#ff7a18';
-  context.fillRect(width * 0.72, height * 0.64, width * 0.04, height * 0.035);
+  context.fillRect(width * 0.73, height * 0.68, width * 0.075, height * 0.035);
+  context.fillStyle = '#45d6ff';
+  context.fillRect(width * 0.62, height * 0.68, width * 0.09, height * 0.018);
 }
 
 /**
