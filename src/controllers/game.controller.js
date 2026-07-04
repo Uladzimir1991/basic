@@ -31,6 +31,10 @@ export async function GameController(ctx, next) {
     ctx.status = notFoundStatusCode;
     return;
   }
+  if (ctx.path === '/') {
+    ctx.redirect('/game/');
+    return;
+  }
   if (ctx.path === '/game') {
     ctx.redirect('/game/');
     return;
@@ -48,7 +52,7 @@ export async function GameController(ctx, next) {
  * @returns {boolean}
  */
 function isGameRequest({ requestPath }) {
-  return requestPath === '/game' || requestPath.startsWith('/game/');
+  return requestPath === '/' || requestPath === '/game' || requestPath.startsWith('/game/');
 }
 
 /**
