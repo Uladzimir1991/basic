@@ -6,6 +6,13 @@ const ammoValue = document.querySelector('#ammo-value');
 const scoreValue = document.querySelector('#score-value');
 const startButton = document.querySelector('#start-button');
 const messagePanel = document.querySelector('#message-panel');
+const moveStick = document.querySelector('#move-stick');
+const moveKnob = document.querySelector('#move-knob');
+const lookPad = document.querySelector('#look-pad');
+const fireButton = document.querySelector('#fire-button');
+const jumpButton = document.querySelector('#jump-button');
+const runButton = document.querySelector('#run-button');
+const resetButton = document.querySelector('#reset-button');
 const arenaMap = [
   '################',
   '#......#.......#',
@@ -35,6 +42,14 @@ const botsInitialState = Object.freeze([
   { x: 3.4, y: 9.4, health: 80, color: '#45d6ff' },
 ]);
 const keys = new Set();
+const touchControls = {
+  forward: 0,
+  strafe: 0,
+  isRunning: false,
+  movePointerId: null,
+  lookPointerId: null,
+  lookX: 0,
+};
 const pickups = createPickups();
 const player = {
   x: 2.3,
@@ -58,6 +73,7 @@ const fieldOfView = Math.PI / 3;
 const rayStep = 2;
 const maxRayDistance = 16;
 const mouseSensitivity = 0.0024;
+const touchLookSensitivity = 0.007;
 const walkSpeed = 3.2;
 const runMultiplier = 1.45;
 const rocketSpeed = 8.4;
@@ -70,6 +86,7 @@ const botTouchDamage = 18;
 const gravity = 13;
 const jumpVelocity = 5.2;
 const wallPadding = 0.18;
+const stickRadius = 58;
 
 startButton.addEventListener('click', startGame);
 window.addEventListener('keydown', handleKeyDown);
@@ -77,6 +94,18 @@ window.addEventListener('keyup', handleKeyUp);
 window.addEventListener('mousedown', handleMouseDown);
 window.addEventListener('mousemove', handleMouseMove);
 window.addEventListener('resize', resizeCanvas);
+moveStick.addEventListener('pointerdown', handleMoveStart);
+moveStick.addEventListener('pointermove', handleMoveChange);
+moveStick.addEventListener('pointerup', resetMoveStick);
+moveStick.addEventListener('pointercancel', resetMoveStick);
+lookPad.addEventListener('pointerdown', handleLookStart);
+lookPad.addEventListener('pointermove', handleLookChange);
+lookPad.addEventListener('pointerup', resetLookPad);
+lookPad.addEventListener('pointercancel', resetLookPad);
+fireButton.addEventListener('pointerdown', handleFireTouch);
+jumpButton.addEventListener('pointerdown', handleJumpTouch);
+runButton.addEventListener('pointerdown', toggleRunTouch);
+resetButton.addEventListener('pointerdown', handleResetTouch);
 resizeCanvas();
 requestAnimationFrame(loop);
 
@@ -86,8 +115,10 @@ requestAnimationFrame(loop);
 function startGame() {
   isStarted = true;
   startButton.classList.add('is-hidden');
-  updateMessage('Матч начался: держите скорость и контролируйте центр арены');
-  canvas.requestPointerLock();
+  updateMessage('Матч начался: на смартфоне используйте стик, свайп и кнопки');
+  if (!isTouchDevice()) {
+    canvas.requestPointerLock();
+  }
 }
 
 /**
@@ -135,6 +166,151 @@ function handleMouseMove(event) {
 }
 
 /**
+ * @param {PointerEvent} event
+ * @returns {void}
+ */
+function handleMoveStart(event) {
+  event.preventDefault();
+  touchControls.movePointerId = event.pointerId;
+  moveStick.setPointerCapture(event.pointerId);
+  updateMoveStick(event);
+}
+
+/**
+ * @param {PointerEvent} event
+ * @returns {void}
+ */
+function handleMoveChange(event) {
+  if (event.pointerId !== touchControls.movePointerId) {
+    return;
+  }
+  event.preventDefault();
+  updateMoveStick(event);
+}
+
+/**
+ * @param {PointerEvent} event
+ * @returns {void}
+ */
+function resetMoveStick(event) {
+  if (event.pointerId !== touchControls.movePointerId) {
+    return;
+  }
+  touchControls.forward = 0;
+  touchControls.strafe = 0;
+  touchControls.movePointerId = null;
+  moveKnob.style.transform = 'translate(-50%, -50%)';
+}
+
+/**
+ * @param {PointerEvent} event
+ * @returns {void}
+ */
+function updateMoveStick(event) {
+  const rect = moveStick.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  const offsetX = event.clientX - centerX;
+  const offsetY = event.clientY - centerY;
+  const distance = Math.min(Math.hypot(offsetX, offsetY), stickRadius);
+  const angle = Math.atan2(offsetY, offsetX);
+  const knobX = Math.cos(angle) * distance;
+  const knobY = Math.sin(angle) * distance;
+  touchControls.strafe = knobX / stickRadius;
+  touchControls.forward = -knobY / stickRadius;
+  moveKnob.style.transform = `translate(calc(-50% + ${knobX}px), calc(-50% + ${knobY}px))`;
+}
+
+/**
+ * @param {PointerEvent} event
+ * @returns {void}
+ */
+function handleLookStart(event) {
+  if (event.target.closest('.move-stick, .action-buttons, .start-button')) {
+    return;
+  }
+  event.preventDefault();
+  touchControls.lookPointerId = event.pointerId;
+  touchControls.lookX = event.clientX;
+  lookPad.setPointerCapture(event.pointerId);
+}
+
+/**
+ * @param {PointerEvent} event
+ * @returns {void}
+ */
+function handleLookChange(event) {
+  if (event.pointerId !== touchControls.lookPointerId) {
+    return;
+  }
+  event.preventDefault();
+  player.angle = normalizeAngle(player.angle + (event.clientX - touchControls.lookX) * touchLookSensitivity);
+  touchControls.lookX = event.clientX;
+}
+
+/**
+ * @param {PointerEvent} event
+ * @returns {void}
+ */
+function resetLookPad(event) {
+  if (event.pointerId !== touchControls.lookPointerId) {
+    return;
+  }
+  touchControls.lookPointerId = null;
+}
+
+/**
+ * @param {PointerEvent} event
+ * @returns {void}
+ */
+function handleFireTouch(event) {
+  event.preventDefault();
+  startGameFromTouch();
+  shootRocket();
+}
+
+/**
+ * @param {PointerEvent} event
+ * @returns {void}
+ */
+function handleJumpTouch(event) {
+  event.preventDefault();
+  startGameFromTouch();
+  jumpPlayer();
+}
+
+/**
+ * @param {PointerEvent} event
+ * @returns {void}
+ */
+function toggleRunTouch(event) {
+  event.preventDefault();
+  startGameFromTouch();
+  touchControls.isRunning = !touchControls.isRunning;
+  runButton.classList.toggle('is-active', touchControls.isRunning);
+}
+
+/**
+ * @param {PointerEvent} event
+ * @returns {void}
+ */
+function handleResetTouch(event) {
+  event.preventDefault();
+  resetMatch();
+  startGameFromTouch();
+}
+
+/**
+ * @returns {void}
+ */
+function startGameFromTouch() {
+  if (isStarted) {
+    return;
+  }
+  startGame();
+}
+
+/**
  * @returns {void}
  */
 function resizeCanvas() {
@@ -177,9 +353,10 @@ function updateGame(deltaTime) {
  * @returns {void}
  */
 function updatePlayer(deltaTime) {
-  const speed = keys.has('ShiftLeft') || keys.has('ShiftRight') ? walkSpeed * runMultiplier : walkSpeed;
-  const forward = getAxis('KeyW', 'KeyS');
-  const strafe = getAxis('KeyD', 'KeyA');
+  const isRunning = keys.has('ShiftLeft') || keys.has('ShiftRight') || touchControls.isRunning;
+  const speed = isRunning ? walkSpeed * runMultiplier : walkSpeed;
+  const forward = clampAxis(getAxis('KeyW', 'KeyS') + touchControls.forward);
+  const strafe = clampAxis(getAxis('KeyD', 'KeyA') + touchControls.strafe);
   const movement = getMovementVector({ forward, strafe, speed, deltaTime });
   moveEntity({ entity: player, deltaX: movement.x, deltaY: movement.y });
   player.velocityZ -= gravity * deltaTime;
@@ -212,6 +389,14 @@ function getMovementVector({ forward, strafe, speed, deltaTime }) {
  */
 function getAxis(positiveKey, negativeKey) {
   return Number(keys.has(positiveKey)) - Number(keys.has(negativeKey));
+}
+
+/**
+ * @param {number} value
+ * @returns {number}
+ */
+function clampAxis(value) {
+  return Math.max(-1, Math.min(1, value));
 }
 
 /**
@@ -674,6 +859,13 @@ function normalizeAngle(angle) {
     result += Math.PI * 2;
   }
   return result;
+}
+
+/**
+ * @returns {boolean}
+ */
+function isTouchDevice() {
+  return navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches;
 }
 
 /**
