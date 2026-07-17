@@ -720,10 +720,10 @@ function renderGame() {
   drawBackground({ width, height });
   const depthBuffer = drawWalls({ width, height });
   drawSprites({ width, height, depthBuffer });
+  drawVignette({ width, height });
   drawWeapon({ width, height });
   drawCrosshair({ width, height });
   drawMiniMap();
-  drawVignette({ width, height });
 }
 
 /**
@@ -1017,33 +1017,81 @@ function drawPickupSprite({ screenX, spriteTop, screenSize, color, type }) {
  * @returns {void}
  */
 function drawWeapon({ width, height }) {
-  const kickOffset = player.weaponKick * height * 0.035;
-  const weaponGradient = context.createLinearGradient(width * 0.52, height * 0.57 + kickOffset, width * 0.86, height * 0.88 + kickOffset);
-  weaponGradient.addColorStop(0, '#3a4358');
-  weaponGradient.addColorStop(0.45, '#111827');
-  weaponGradient.addColorStop(1, '#05060a');
-  context.fillStyle = weaponGradient;
+  const isMobileLayout = width < 640;
+  const scale = Math.min(width, height) * (isMobileLayout ? 0.00135 : 0.00115);
+  const anchorX = isMobileLayout ? width * 0.52 : width * 0.72;
+  const anchorY = height * (isMobileLayout ? 0.78 : 0.96);
+  const kickOffset = player.weaponKick * scale * 18;
+  const barrelLength = scale * 118;
+  const barrelWidth = scale * 22;
+  const bodyWidth = scale * 68;
+  const bodyHeight = scale * 52;
+  const angle = -0.22;
+  context.save();
+  context.translate(anchorX, anchorY + kickOffset);
+  context.rotate(angle);
+  context.fillStyle = 'rgb(0 0 0 / 55%)';
+  context.fillRect(-bodyWidth * 0.55, bodyHeight * 0.35, bodyWidth * 1.15, scale * 14);
+  const bodyGradient = context.createLinearGradient(-bodyWidth, -bodyHeight, bodyWidth, bodyHeight);
+  bodyGradient.addColorStop(0, '#5a6478');
+  bodyGradient.addColorStop(0.35, '#2a3142');
+  bodyGradient.addColorStop(1, '#0a0d14');
+  context.fillStyle = bodyGradient;
   context.beginPath();
-  context.moveTo(width * 0.52, height * 0.8 + kickOffset);
-  context.lineTo(width * 0.61, height * 0.61 + kickOffset);
-  context.lineTo(width * 0.8, height * 0.62 + kickOffset);
-  context.lineTo(width * 0.88, height * 0.78 + kickOffset);
-  context.lineTo(width * 0.74, height * 0.9 + kickOffset);
+  context.moveTo(-bodyWidth * 0.72, bodyHeight * 0.15);
+  context.lineTo(bodyWidth * 0.35, -bodyHeight * 0.55);
+  context.lineTo(bodyWidth * 0.82, -bodyHeight * 0.35);
+  context.lineTo(bodyWidth * 0.95, bodyHeight * 0.45);
+  context.lineTo(-bodyWidth * 0.35, bodyHeight * 0.72);
   context.closePath();
   context.fill();
-  context.fillStyle = '#0b101c';
-  context.fillRect(width * 0.72, height * 0.68 + kickOffset, width * 0.14, height * 0.07);
+  context.strokeStyle = '#45d6ff';
+  context.lineWidth = Math.max(2, scale * 1.4);
+  context.stroke();
+  context.fillStyle = '#151b28';
+  context.fillRect(-bodyWidth * 0.15, -bodyHeight * 0.15, bodyWidth * 0.55, bodyHeight * 0.35);
   context.fillStyle = '#ff7a18';
-  context.fillRect(width * 0.76, height * 0.695 + kickOffset, width * 0.08, height * 0.032);
-  context.fillStyle = '#45d6ff';
-  context.fillRect(width * 0.61, height * 0.68 + kickOffset, width * 0.11, height * 0.018);
-  if (player.weaponKick <= 0) {
+  context.fillRect(bodyWidth * 0.08, -bodyHeight * 0.08, bodyWidth * 0.38, scale * 5);
+  const drawBarrel = ({ offsetY, highlight }) => {
+    context.fillStyle = highlight ? '#4a5368' : '#232a3a';
+    context.fillRect(bodyWidth * 0.55, offsetY - barrelWidth * 0.5, barrelLength, barrelWidth);
+    context.fillStyle = '#0b101c';
+    context.fillRect(bodyWidth * 0.55 + barrelLength * 0.72, offsetY - barrelWidth * 0.35, barrelLength * 0.28, barrelWidth * 0.7);
+    context.fillStyle = '#ff7a18';
+    context.fillRect(bodyWidth * 0.55 + barrelLength * 0.94, offsetY - barrelWidth * 0.22, scale * 6, barrelWidth * 0.44);
+  };
+  drawBarrel({ offsetY: -scale * 8, highlight: true });
+  drawBarrel({ offsetY: scale * 10, highlight: false });
+  context.fillStyle = '#1a2233';
+  context.beginPath();
+  context.moveTo(-bodyWidth * 0.55, bodyHeight * 0.55);
+  context.lineTo(-bodyWidth * 0.35, bodyHeight * 0.95);
+  context.lineTo(bodyWidth * 0.05, bodyHeight * 0.82);
+  context.lineTo(bodyWidth * 0.12, bodyHeight * 0.45);
+  context.closePath();
+  context.fill();
+  context.fillStyle = '#8b95a8';
+  context.fillRect(-bodyWidth * 0.62, bodyHeight * 0.62, scale * 10, bodyHeight * 0.38);
+  if (player.weaponKick > 0) {
+    const muzzleX = bodyWidth * 0.55 + barrelLength;
+    context.fillStyle = `rgb(255 209 102 / ${Math.min(0.85, player.weaponKick + 0.15)})`;
+    context.beginPath();
+    context.arc(muzzleX, -scale * 8, scale * 14 * player.weaponKick, 0, Math.PI * 2);
+    context.fill();
+    context.beginPath();
+    context.arc(muzzleX, scale * 10, scale * 12 * player.weaponKick, 0, Math.PI * 2);
+    context.fill();
+  }
+  context.restore();
+  if (!isStarted) {
     return;
   }
-  context.fillStyle = `rgb(255 209 102 / ${Math.min(0.7, player.weaponKick)})`;
-  context.beginPath();
-  context.arc(width * 0.85, height * 0.71 + kickOffset, width * 0.035 * player.weaponKick, 0, Math.PI * 2);
-  context.fill();
+  context.save();
+  context.font = `800 ${Math.max(10, scale * 7)}px Inter, sans-serif`;
+  context.fillStyle = 'rgb(245 247 251 / 88%)';
+  context.textAlign = isMobileLayout ? 'center' : 'right';
+  context.fillText('ROCKET LAUNCHER', isMobileLayout ? width * 0.5 : width - 16, height - scale * 8);
+  context.restore();
 }
 
 /**
