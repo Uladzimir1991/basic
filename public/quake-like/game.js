@@ -108,14 +108,14 @@ const weaponConfigs = Object.freeze({
     id: 'lightning',
     shortName: 'LG',
     name: 'LIGHTNING GUN',
-    ammoKey: 'cells',
-    ammoPerPickup: 60,
-    startAmmo: 60,
+    ammoKey: 'lightning',
+    ammoPerPickup: 100,
+    startAmmo: 100,
     maxAmmo: 200,
-    cooldown: 45,
+    cooldown: 16,
     damage: 8,
-    maxRange: 7.2,
-    kick: 0.35,
+    maxRange: 8.5,
+    kick: 0.22,
     mode: 'beam',
     color: '#3a4a6a',
     accent: '#9ad7ff',
@@ -190,6 +190,7 @@ const touchControls = {
   lookPointerId: null,
   lookX: 0,
 };
+let isMouseFiring = false;
 const pickups = createPickups();
 const player = createPlayerState();
 let bots = createBots();
@@ -231,6 +232,8 @@ startButton.addEventListener('click', startGame);
 window.addEventListener('keydown', handleKeyDown);
 window.addEventListener('keyup', handleKeyUp);
 window.addEventListener('mousedown', handleMouseDown);
+window.addEventListener('mouseup', handleMouseUp);
+window.addEventListener('blur', handleMouseUp);
 window.addEventListener('mousemove', handleMouseMove);
 window.addEventListener('resize', resizeCanvas);
 moveStick.addEventListener('pointerdown', handleMoveStart);
@@ -266,7 +269,7 @@ requestAnimationFrame(loop);
  *   weaponKick: number,
  *   weaponId: string,
  *   ownedWeapons: Set<string>,
- *   ammo: { bullets: number, shells: number, rockets: number, cells: number, slugs: number },
+ *   ammo: { bullets: number, shells: number, rockets: number, cells: number, slugs: number, lightning: number },
  * }}
  */
 function createPlayerState() {
@@ -290,6 +293,7 @@ function createPlayerState() {
       rockets: 0,
       cells: 0,
       slugs: 0,
+      lightning: 0,
     },
   };
 }
@@ -346,7 +350,15 @@ function handleMouseDown(event) {
   if (!isStarted || event.button !== 0) {
     return;
   }
+  isMouseFiring = true;
   fireCurrentWeapon();
+}
+
+/**
+ * @returns {void}
+ */
+function handleMouseUp() {
+  isMouseFiring = false;
 }
 
 /**
@@ -571,7 +583,7 @@ function updateGame(deltaTime) {
  * @returns {void}
  */
 function updateTouchFire() {
-  if (!touchControls.isFiring) {
+  if (!touchControls.isFiring && !isMouseFiring) {
     return;
   }
   fireCurrentWeapon();
@@ -845,21 +857,16 @@ function fireBeamWeapon(weapon) {
   beams = beams.filter((beam) => beam.type !== 'lightning');
   beams.push({
     type: 'lightning',
-    x1: player.x + Math.cos(player.angle) * 0.45,
-    y1: player.y + Math.sin(player.angle) * 0.45,
+    x1: player.x + Math.cos(player.angle) * 0.55,
+    y1: player.y + Math.sin(player.angle) * 0.55,
     x2: hit.x,
     y2: hit.y,
-    life: 0.12,
+    life: 0.09,
     color: weapon.accent,
     distance: hit.distance,
   });
-  createParticles({ x: hit.x, y: hit.y, color: weapon.accent, amount: 6 });
-  createParticles({
-    x: player.x + Math.cos(player.angle) * 0.5,
-    y: player.y + Math.sin(player.angle) * 0.5,
-    color: '#ffffff',
-    amount: 3,
-  });
+  player.weaponKick = Math.max(player.weaponKick, 0.55);
+  createParticles({ x: hit.x, y: hit.y, color: weapon.accent, amount: 4 });
 }
 
 /**
@@ -1228,6 +1235,7 @@ function renderGame() {
   drawSprites({ width, height, depthBuffer });
   drawVignette({ width, height });
   drawWeapon({ width, height });
+  drawActiveLightningShaft({ width, height });
   drawCrosshair({ width, height });
   drawMiniMap();
 }
@@ -1420,14 +1428,13 @@ function drawSprites({ width, height, depthBuffer }) {
  */
 function drawBeams({ width, height }) {
   beams.forEach((beam) => {
+    if (beam.type === 'lightning') {
+      return;
+    }
     const end = projectWorldPoint({ x: beam.x2, y: beam.y2, width, height, minDistance: 0.01 });
     const start = projectWorldPoint({ x: beam.x1, y: beam.y1, width, height, minDistance: 0.01 })
       || { x: width * 0.58, y: height * 0.62 };
     if (!end) {
-      return;
-    }
-    if (beam.type === 'lightning') {
-      drawLightningBeam({ start, end, color: beam.color, life: beam.life, width, height });
       return;
     }
     context.strokeStyle = beam.color;
@@ -1442,51 +1449,89 @@ function drawBeams({ width, height }) {
 }
 
 /**
+ * Draws the lightning shaft in screen space after the FP weapon so it is always visible.
+ * @param {{ width: number, height: number }} params
+ * @returns {void}
+ */
+function drawActiveLightningShaft({ width, height }) {
+  const weapon = getCurrentWeapon();
+  if (weapon.id !== 'lightning') {
+    return;
+  }
+  const beam = beams.find((entry) => entry.type === 'lightning');
+  if (!beam) {
+    return;
+  }
+  const isMobileLayout = width < 640;
+  const scale = Math.min(width, height) * (isMobileLayout ? 0.0014 : 0.0012);
+  const kickOffset = player.weaponKick * scale * 20;
+  const muzzleX = (isMobileLayout ? width * 0.54 : width * 0.74) + scale * 100;
+  const muzzleY = height * (isMobileLayout ? 0.8 : 0.97) + kickOffset - scale * 8;
+  const end = projectWorldPoint({ x: beam.x2, y: beam.y2, width, height, minDistance: 0.01 })
+    || { x: width * 0.5, y: height * 0.42 };
+  const reach = Math.min(1, beam.distance / (weapon.maxRange || 8.5));
+  const tip = {
+    x: muzzleX + (end.x - muzzleX) * (0.55 + reach * 0.45),
+    y: muzzleY + (end.y - muzzleY) * (0.55 + reach * 0.45),
+  };
+  drawLightningBeam({
+    start: { x: muzzleX, y: muzzleY },
+    end: tip,
+    color: beam.color,
+    life: Math.max(beam.life, 0.08),
+    width,
+    height,
+  });
+}
+
+/**
  * @param {{ start: { x: number, y: number }, end: { x: number, y: number }, color: string, life: number, width: number, height: number }} params
  * @returns {void}
  */
 function drawLightningBeam({ start, end, color, life }) {
-  const segments = 10;
-  const alpha = Math.max(0.45, Math.min(1, life * 8));
+  const segments = 14;
+  const alpha = Math.max(0.7, Math.min(1, life * 12));
   context.save();
-  context.globalAlpha = alpha * 0.35;
+  context.globalAlpha = alpha * 0.45;
   context.strokeStyle = color;
-  context.lineWidth = 10;
+  context.lineWidth = 16;
+  context.lineCap = 'round';
   context.beginPath();
   context.moveTo(start.x, start.y);
   context.lineTo(end.x, end.y);
   context.stroke();
   context.globalAlpha = alpha;
+  context.strokeStyle = '#eaf6ff';
+  context.lineWidth = 5;
+  context.beginPath();
+  context.moveTo(start.x, start.y);
+  for (let i = 1; i < segments; i += 1) {
+    const t = i / segments;
+    const x = start.x + (end.x - start.x) * t + (Math.random() - 0.5) * 22;
+    const y = start.y + (end.y - start.y) * t + (Math.random() - 0.5) * 22;
+    context.lineTo(x, y);
+  }
+  context.lineTo(end.x, end.y);
+  context.stroke();
   context.strokeStyle = '#ffffff';
-  context.lineWidth = 3;
+  context.lineWidth = 2.5;
   context.beginPath();
   context.moveTo(start.x, start.y);
   for (let i = 1; i < segments; i += 1) {
     const t = i / segments;
-    const x = start.x + (end.x - start.x) * t + (Math.random() - 0.5) * 18;
-    const y = start.y + (end.y - start.y) * t + (Math.random() - 0.5) * 18;
+    const x = start.x + (end.x - start.x) * t + (Math.random() - 0.5) * 12;
+    const y = start.y + (end.y - start.y) * t + (Math.random() - 0.5) * 12;
     context.lineTo(x, y);
   }
   context.lineTo(end.x, end.y);
   context.stroke();
-  context.strokeStyle = color;
-  context.lineWidth = 2;
+  context.fillStyle = 'rgb(255 255 255 / 80%)';
   context.beginPath();
-  context.moveTo(start.x, start.y);
-  for (let i = 1; i < segments; i += 1) {
-    const t = i / segments;
-    const x = start.x + (end.x - start.x) * t + (Math.random() - 0.5) * 10;
-    const y = start.y + (end.y - start.y) * t + (Math.random() - 0.5) * 10;
-    context.lineTo(x, y);
-  }
-  context.lineTo(end.x, end.y);
-  context.stroke();
-  context.fillStyle = 'rgb(154 215 255 / 55%)';
-  context.beginPath();
-  context.arc(start.x, start.y, 8 + Math.random() * 6, 0, Math.PI * 2);
+  context.arc(start.x, start.y, 12 + Math.random() * 8, 0, Math.PI * 2);
   context.fill();
+  context.fillStyle = 'rgb(154 215 255 / 70%)';
   context.beginPath();
-  context.arc(end.x, end.y, 6 + Math.random() * 5, 0, Math.PI * 2);
+  context.arc(end.x, end.y, 8 + Math.random() * 6, 0, Math.PI * 2);
   context.fill();
   context.restore();
 }
