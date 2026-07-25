@@ -5,6 +5,7 @@ import { DatabaseService } from './services/database.service.js';
 import { EmailService } from './services/email.service.js';
 import { RepositoryService } from './services/repository.service.js';
 import { UserService } from './services/user.service.js';
+import { GameController } from './controllers/game.controller.js';
 import { PutUsersController } from './controllers/put-users.controller.js';
 
 const pool = mysql.createPool({
@@ -39,6 +40,7 @@ app.use(async (ctx, next) => {
 
   return next();
 });
+app.use(GameController);
 app.use(PutUsersController);
 
 export let httpServer;
