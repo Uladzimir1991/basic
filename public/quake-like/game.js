@@ -13,34 +13,58 @@ const fireButton = document.querySelector('#fire-button');
 const jumpButton = document.querySelector('#jump-button');
 const runButton = document.querySelector('#run-button');
 const resetButton = document.querySelector('#reset-button');
+/**
+ * Q3-style symmetrical arena map.
+ * Walls: # metal, G gothic, T tech, B barrier.
+ * Floor items: H health, A ammo, R armor, M megahealth, J jump pad.
+ */
 const arenaMap = [
-  '################',
-  '#......#.......#',
-  '#..A...#...H...#',
-  '#......#.......#',
-  '#......#.......#',
-  '#..............#',
-  '#....##....##..#',
-  '#..............#',
-  '#..H.......A...#',
-  '#..............#',
-  '#.......#......#',
-  '#...A...#...H..#',
-  '#.......#......#',
-  '################',
+  'GGGGGGGGGGGGGGGGGGGGGGGG',
+  'G.......TT....TT.......G',
+  'G..H....TT....TT....A..G',
+  'G.......##....##.......G',
+  'GGG..GGG##....##GGG..GGG',
+  'G.........M..M.........G',
+  'G..A....BBB..BBB....R..G',
+  'G.......B......B.......G',
+  'G.......B..JJ..B.......G',
+  'G.......B..JJ..B.......G',
+  'G.......B......B.......G',
+  'G..R....BBB..BBB....A..G',
+  'G.........M..M.........G',
+  'GGG..GGG##....##GGG..GGG',
+  'G.......##....##.......G',
+  'G..A....TT....TT....H..G',
+  'G.......TT....TT.......G',
+  'GGGGGGGGGGGGGGGGGGGGGGGG',
 ];
+const wallTiles = new Set(['#', 'G', 'T', 'B']);
 const wallColorByType = Object.freeze({
-  '#': '#343b55',
+  '#': '#3a4258',
+  G: '#4a3a32',
+  T: '#2f4a5c',
+  B: '#1d2230',
+});
+const wallAccentByType = Object.freeze({
+  '#': '#ff7a18',
+  G: '#c47a3a',
+  T: '#45d6ff',
+  B: '#ff4d6d',
 });
 const pickupConfigs = Object.freeze({
   H: { type: 'health', amount: 35, color: '#36f28f' },
   A: { type: 'ammo', amount: 8, color: '#ffd166' },
+  R: { type: 'armor', amount: 50, color: '#6ea8ff' },
+  M: { type: 'megahealth', amount: 100, color: '#7dffb2' },
 });
 const botsInitialState = Object.freeze([
-  { x: 12.4, y: 2.6, health: 80, color: '#ff4d6d' },
-  { x: 11.8, y: 10.8, health: 80, color: '#ff7a18' },
-  { x: 3.4, y: 9.4, health: 80, color: '#45d6ff' },
+  { x: 20.5, y: 2.5, health: 100, color: '#ff4d6d' },
+  { x: 20.5, y: 15.5, health: 100, color: '#ff7a18' },
+  { x: 3.5, y: 15.5, health: 100, color: '#45d6ff' },
+  { x: 12.0, y: 9.0, health: 100, color: '#c084fc' },
 ]);
+const playerSpawn = Object.freeze({ x: 3.5, y: 2.5, angle: 0.35 });
+const jumpPadBoost = 8.4;
 const keys = new Set();
 const touchControls = {
   forward: 0,
@@ -53,11 +77,11 @@ const touchControls = {
 };
 const pickups = createPickups();
 const player = {
-  x: 2.3,
-  y: 2.4,
+  x: playerSpawn.x,
+  y: playerSpawn.y,
   velocityX: 0,
   velocityY: 0,
-  angle: 0,
+  angle: playerSpawn.angle,
   velocityZ: 0,
   heightOffset: 0,
   health: 100,
@@ -75,7 +99,7 @@ let isStarted = false;
 const tileSize = 1;
 const fieldOfView = Math.PI / 3;
 const rayStep = 1;
-const maxRayDistance = 16;
+const maxRayDistance = 28;
 const mouseSensitivity = 0.0024;
 const touchLookSensitivity = 0.0052;
 const walkSpeed = 4.2;
@@ -129,7 +153,7 @@ requestAnimationFrame(loop);
 function startGame() {
   isStarted = true;
   startButton.classList.add('is-hidden');
-  updateMessage('Матч начался: на смартфоне используйте стик, свайп и кнопки');
+  updateMessage('Арена Q3-style: контролируйте центр, jump pad и броню');
   if (!isTouchDevice()) {
     canvas.requestPointerLock();
   }
@@ -404,8 +428,21 @@ function updatePlayer(deltaTime) {
   player.heightOffset = Math.max(0, player.heightOffset + player.velocityZ * deltaTime);
   if (player.heightOffset === 0) {
     player.velocityZ = 0;
+    applyJumpPadBoost();
   }
   player.weaponKick = Math.max(0, player.weaponKick - deltaTime * 6);
+}
+
+/**
+ * @returns {void}
+ */
+function applyJumpPadBoost() {
+  if (getMapTile({ x: player.x, y: player.y }) !== 'J') {
+    return;
+  }
+  player.velocityZ = jumpPadBoost;
+  player.heightOffset = 0.02;
+  createParticles({ x: player.x, y: player.y, color: '#45d6ff', amount: 10 });
 }
 
 /**
@@ -682,6 +719,16 @@ function collectPickup(pickup) {
     updateMessage('Подобрано здоровье');
     return;
   }
+  if (pickup.type === 'megahealth') {
+    player.health = Math.min(200, player.health + pickup.amount);
+    updateMessage('Mega Health!');
+    return;
+  }
+  if (pickup.type === 'armor') {
+    player.armor = Math.min(100, player.armor + pickup.amount);
+    updateMessage('Подобрана броня');
+    return;
+  }
   player.ammo = Math.min(50, player.ammo + pickup.amount);
   updateMessage('Пополнены боеприпасы');
 }
@@ -733,15 +780,15 @@ function renderGame() {
 function drawBackground({ width, height }) {
   const horizon = height * 0.48 - player.heightOffset * 16;
   const skyGradient = context.createLinearGradient(0, 0, 0, horizon);
-  skyGradient.addColorStop(0, '#060711');
-  skyGradient.addColorStop(0.46, '#11162a');
-  skyGradient.addColorStop(1, '#2a1c18');
+  skyGradient.addColorStop(0, '#07060a');
+  skyGradient.addColorStop(0.4, '#15101a');
+  skyGradient.addColorStop(1, '#2b1a14');
   context.fillStyle = skyGradient;
   context.fillRect(0, 0, width, horizon);
   const floorGradient = context.createLinearGradient(0, horizon, 0, height);
-  floorGradient.addColorStop(0, '#2a211d');
-  floorGradient.addColorStop(0.55, '#141821');
-  floorGradient.addColorStop(1, '#05060a');
+  floorGradient.addColorStop(0, '#3a2a22');
+  floorGradient.addColorStop(0.4, '#1a1714');
+  floorGradient.addColorStop(1, '#08070a');
   context.fillStyle = floorGradient;
   context.fillRect(0, horizon, width, height - horizon);
   drawFloorGrid({ width, height, horizon });
@@ -789,20 +836,36 @@ function castRay({ angle }) {
  * @returns {void}
  */
 function drawWallColumn({ column, top, wallHeight, shade, hit }) {
-  const baseColor = wallColorByType[hit.tile] || '#2f3345';
+  const tile = wallTiles.has(hit.tile) ? hit.tile : '#';
+  const baseColor = wallColorByType[tile] || '#2f3345';
+  const accentColor = wallAccentByType[tile] || '#ff7a18';
   const textureOffset = getWallTextureOffset({ x: hit.x, y: hit.y });
   const panelLine = textureOffset % textureGridSize < 0.018;
   const emissiveLine = textureOffset > 0.46 && textureOffset < 0.46 + emissiveBandHeight;
+  const gothicBand = tile === 'G' && textureOffset > 0.2 && textureOffset < 0.28;
+  const techSeam = tile === 'T' && textureOffset % 0.09 < 0.012;
   const color = panelLine ? '#111827' : baseColor;
   context.fillStyle = getShadedColor({ color, shade });
   context.fillRect(column, top, rayStep + 1, wallHeight);
   if (emissiveLine) {
-    context.fillStyle = getShadedColor({ color: '#ff7a18', shade: Math.min(1, shade + 0.35) });
+    context.fillStyle = getShadedColor({ color: accentColor, shade: Math.min(1, shade + 0.35) });
     context.fillRect(column, top + wallHeight * 0.36, rayStep + 1, Math.max(2, wallHeight * 0.08));
   }
+  if (gothicBand) {
+    context.fillStyle = getShadedColor({ color: '#6b4a38', shade: Math.min(1, shade + 0.15) });
+    context.fillRect(column, top + wallHeight * 0.18, rayStep + 1, Math.max(2, wallHeight * 0.05));
+  }
+  if (techSeam) {
+    context.fillStyle = getShadedColor({ color: '#45d6ff', shade: Math.min(0.8, shade + 0.25) });
+    context.fillRect(column, top + wallHeight * 0.55, rayStep + 1, Math.max(1, wallHeight * 0.02));
+  }
   if (panelLine) {
-    context.fillStyle = getShadedColor({ color: '#45d6ff', shade: Math.min(0.75, shade + 0.2) });
+    context.fillStyle = getShadedColor({ color: accentColor, shade: Math.min(0.75, shade + 0.2) });
     context.fillRect(column, top, rayStep + 1, Math.max(1, wallHeight * 0.025));
+  }
+  if (tile === 'B') {
+    context.fillStyle = getShadedColor({ color: '#ff4d6d', shade: Math.min(0.7, shade + 0.1) });
+    context.fillRect(column, top + wallHeight * 0.7, rayStep + 1, Math.max(1, wallHeight * 0.04));
   }
 }
 
@@ -821,20 +884,28 @@ function getWallTextureOffset({ x, y }) {
  * @returns {void}
  */
 function drawFloorGrid({ width, height, horizon }) {
-  context.strokeStyle = 'rgb(255 122 24 / 18%)';
+  context.strokeStyle = 'rgb(196 122 58 / 22%)';
   context.lineWidth = 1;
-  for (let i = 1; i < 14; i += 1) {
-    const y = horizon + ((height - horizon) * i * i) / 196;
+  for (let i = 1; i < 16; i += 1) {
+    const y = horizon + ((height - horizon) * i * i) / 256;
     context.beginPath();
     context.moveTo(0, y);
     context.lineTo(width, y);
     context.stroke();
   }
-  for (let i = -8; i <= 8; i += 1) {
-    const x = width * 0.5 + i * width * 0.08;
+  for (let i = -10; i <= 10; i += 1) {
+    const x = width * 0.5 + i * width * 0.07;
     context.beginPath();
     context.moveTo(width * 0.5, horizon);
     context.lineTo(x, height);
+    context.stroke();
+  }
+  context.strokeStyle = 'rgb(69 214 255 / 12%)';
+  for (let i = 2; i < 10; i += 2) {
+    const y = horizon + ((height - horizon) * i * i) / 256;
+    context.beginPath();
+    context.moveTo(width * 0.2, y);
+    context.lineTo(width * 0.8, y);
     context.stroke();
   }
 }
@@ -872,9 +943,27 @@ function drawSprites({ width, height, depthBuffer }) {
     ...bots.map((bot) => ({ ...bot, spriteType: 'bot', size: 0.82 })),
     ...rockets.map((rocket) => ({ ...rocket, spriteType: 'rocket', size: 0.22, color: '#ffd166' })),
     ...getVisiblePickups(),
+    ...getJumpPadSprites(),
     ...particles.map((particle) => ({ ...particle, spriteType: 'particle', size: 0.14 })),
   ].sort((a, b) => getSpriteDistance(b) - getSpriteDistance(a));
   sprites.forEach((sprite) => drawSprite({ sprite, width, height, depthBuffer }));
+}
+
+/**
+ * @returns {{ x: number, y: number, color: string, spriteType: string, size: number }[]}
+ */
+function getJumpPadSprites() {
+  return arenaMap.flatMap((row, y) => row
+    .split('')
+    .map((tile, x) => ({ tile, x, y }))
+    .filter(({ tile }) => tile === 'J')
+    .map(({ x, y }) => ({
+      x: x + 0.5,
+      y: y + 0.5,
+      color: '#45d6ff',
+      spriteType: 'jumppad',
+      size: 0.48,
+    })));
 }
 
 /**
@@ -917,8 +1006,36 @@ function drawSprite({ sprite, width, height, depthBuffer }) {
     drawPickupSprite({ screenX, spriteTop, screenSize, color: sprite.color, type: sprite.type });
     return;
   }
+  if (sprite.spriteType === 'jumppad') {
+    drawJumpPadSprite({ screenX, spriteTop, screenSize });
+    return;
+  }
   context.beginPath();
   context.arc(screenX, spriteTop + screenSize * 0.5, screenSize * 0.5, 0, Math.PI * 2);
+  context.fill();
+}
+
+/**
+ * @param {{ screenX: number, spriteTop: number, screenSize: number }} params
+ * @returns {void}
+ */
+function drawJumpPadSprite({ screenX, spriteTop, screenSize }) {
+  const centerY = spriteTop + screenSize * 0.72;
+  context.fillStyle = 'rgb(69 214 255 / 28%)';
+  context.beginPath();
+  context.ellipse(screenX, centerY, screenSize * 0.7, screenSize * 0.28, 0, 0, Math.PI * 2);
+  context.fill();
+  context.strokeStyle = '#45d6ff';
+  context.lineWidth = Math.max(2, screenSize * 0.08);
+  context.beginPath();
+  context.ellipse(screenX, centerY, screenSize * 0.55, screenSize * 0.2, 0, 0, Math.PI * 2);
+  context.stroke();
+  context.fillStyle = '#ff7a18';
+  context.beginPath();
+  context.moveTo(screenX, centerY - screenSize * 0.45);
+  context.lineTo(screenX + screenSize * 0.18, centerY);
+  context.lineTo(screenX - screenSize * 0.18, centerY);
+  context.closePath();
   context.fill();
 }
 
@@ -998,9 +1115,15 @@ function drawPickupSprite({ screenX, spriteTop, screenSize, color, type }) {
   context.arc(screenX, centerY, screenSize * 0.5, 0, Math.PI * 2);
   context.stroke();
   context.fillStyle = color;
-  if (type === 'health') {
+  if (type === 'health' || type === 'megahealth') {
     context.fillRect(screenX - screenSize * 0.12, centerY - screenSize * 0.35, screenSize * 0.24, screenSize * 0.7);
     context.fillRect(screenX - screenSize * 0.35, centerY - screenSize * 0.12, screenSize * 0.7, screenSize * 0.24);
+    return;
+  }
+  if (type === 'armor') {
+    context.fillRect(screenX - screenSize * 0.28, centerY - screenSize * 0.28, screenSize * 0.56, screenSize * 0.56);
+    context.fillStyle = '#0b101c';
+    context.fillRect(screenX - screenSize * 0.14, centerY - screenSize * 0.14, screenSize * 0.28, screenSize * 0.28);
     return;
   }
   context.beginPath();
@@ -1119,19 +1242,51 @@ function drawCrosshair({ width, height }) {
  * @returns {void}
  */
 function drawMiniMap() {
-  const scale = 7;
-  const offsetX = 18;
-  const offsetY = 18;
-  context.fillStyle = 'rgb(0 0 0 / 48%)';
-  context.fillRect(offsetX - 8, offsetY - 8, arenaMap[0].length * scale + 16, arenaMap.length * scale + 16);
+  const scale = 4;
+  const offsetX = 12;
+  const offsetY = 12;
+  context.fillStyle = 'rgb(0 0 0 / 55%)';
+  context.fillRect(offsetX - 6, offsetY - 6, arenaMap[0].length * scale + 12, arenaMap.length * scale + 12);
   arenaMap.forEach((row, y) => {
     row.split('').forEach((tile, x) => {
-      context.fillStyle = tile === '#' ? '#596179' : 'rgb(255 255 255 / 9%)';
+      context.fillStyle = getMiniMapTileColor(tile);
       context.fillRect(offsetX + x * scale, offsetY + y * scale, scale - 1, scale - 1);
     });
   });
   drawMiniMapPoint({ x: player.x, y: player.y, color: '#f5f7fb', scale, offsetX, offsetY });
   bots.forEach((bot) => drawMiniMapPoint({ x: bot.x, y: bot.y, color: bot.color, scale, offsetX, offsetY }));
+}
+
+/**
+ * @param {string} tile
+ * @returns {string}
+ */
+function getMiniMapTileColor(tile) {
+  if (tile === 'G') {
+    return '#6b4a38';
+  }
+  if (tile === 'T') {
+    return '#3a6a7a';
+  }
+  if (tile === 'B') {
+    return '#2a3145';
+  }
+  if (tile === '#') {
+    return '#596179';
+  }
+  if (tile === 'J') {
+    return '#45d6ff';
+  }
+  if (tile === 'H' || tile === 'M') {
+    return '#36f28f';
+  }
+  if (tile === 'A') {
+    return '#ffd166';
+  }
+  if (tile === 'R') {
+    return '#6ea8ff';
+  }
+  return 'rgb(255 255 255 / 9%)';
 }
 
 /**
@@ -1169,7 +1324,7 @@ function moveEntity({ entity, deltaX, deltaY }) {
  * @returns {boolean}
  */
 function isWall({ x, y }) {
-  return getMapTile({ x, y }) === '#';
+  return wallTiles.has(getMapTile({ x, y }));
 }
 
 /**
@@ -1287,15 +1442,18 @@ function updateMessage(message) {
  * @returns {void}
  */
 function resetMatch() {
-  player.x = 2.3;
-  player.y = 2.4;
-  player.angle = 0;
+  player.x = playerSpawn.x;
+  player.y = playerSpawn.y;
+  player.angle = playerSpawn.angle;
+  player.velocityX = 0;
+  player.velocityY = 0;
   player.velocityZ = 0;
   player.heightOffset = 0;
   player.health = 100;
   player.armor = 50;
   player.ammo = 24;
   player.score = 0;
+  player.weaponKick = 0;
   bots = createBots();
   rockets = [];
   particles = [];
