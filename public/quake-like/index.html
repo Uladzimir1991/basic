@@ -12,8 +12,8 @@
         <p class="eyebrow">Q3-style deathmatch arena</p>
         <h1>Arena Protocol</h1>
         <p class="description">
-          Симметричная арена в канонах Quake III: gothic/tech стены, центральный pit
-          с jump pad, боковые комнаты, health/armor/ammo и rocket jump.
+          Симметричная арена в канонах Quake III: gothic/tech стены, jump pad,
+          health/armor и набор оружий — Machine Gun, Shotgun, Rocket, Lightning, Railgun, Plasma.
         </p>
       </section>
       <section class="viewport-panel" aria-label="Игровой экран">
@@ -28,8 +28,12 @@
             <strong id="armor-value">50</strong>
           </div>
           <div>
+            <span>Weapon</span>
+            <strong id="weapon-value">MG</strong>
+          </div>
+          <div>
             <span>Ammo</span>
-            <strong id="ammo-value">24</strong>
+            <strong id="ammo-value">100</strong>
           </div>
           <div>
             <span>Score</span>
@@ -46,6 +50,7 @@
           <div class="action-buttons">
             <button id="run-button" class="touch-button touch-button-secondary" type="button">Run</button>
             <button id="jump-button" class="touch-button touch-button-secondary" type="button">Jump</button>
+            <button id="weapon-button" class="touch-button touch-button-secondary" type="button">Weap</button>
             <button id="reset-button" class="touch-button touch-button-secondary" type="button">Reset</button>
             <button id="fire-button" class="touch-button touch-button-primary" type="button">Fire</button>
           </div>
@@ -57,10 +62,11 @@
           <li><kbd>WASD</kbd> движение и стрейф</li>
           <li><kbd>Mouse</kbd> обзор</li>
           <li><kbd>ЛКМ</kbd> выстрел</li>
+          <li><kbd>1-6</kbd> / <kbd>Q</kbd><kbd>E</kbd> смена оружия</li>
           <li><kbd>Space</kbd> прыжок</li>
           <li><kbd>Shift</kbd> ускорение</li>
           <li><kbd>R</kbd> сброс матча</li>
-          <li><kbd>Touch</kbd> стик, свайп обзора и кнопки на смартфоне</li>
+          <li><kbd>Touch</kbd> стик, свайп, Fire / Weap на смартфоне</li>
         </ul>
       </section>
     </main>
