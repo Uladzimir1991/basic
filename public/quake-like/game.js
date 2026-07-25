@@ -58,17 +58,18 @@ const weaponOrder = Object.freeze(['machinegun', 'shotgun', 'rocket', 'lightning
 const weaponConfigs = Object.freeze({
   machinegun: {
     id: 'machinegun',
-    shortName: 'MG',
-    name: 'MACHINE GUN',
+    shortName: 'LMG',
+    name: 'LIGHT MACHINE GUN',
     ammoKey: 'bullets',
     ammoPerPickup: 50,
     startAmmo: 100,
     maxAmmo: 200,
-    cooldown: 100,
-    damage: 8,
-    kick: 0.35,
+    cooldown: 85,
+    damage: 7,
+    kick: 0.28,
     mode: 'hitscan',
-    color: '#9aa3b2',
+    tracer: true,
+    color: '#8a93a3',
     accent: '#ffd166',
   },
   shotgun: {
@@ -79,14 +80,14 @@ const weaponConfigs = Object.freeze({
     ammoPerPickup: 10,
     startAmmo: 10,
     maxAmmo: 50,
-    cooldown: 900,
-    damage: 12,
-    pellets: 7,
-    spread: 0.14,
-    kick: 0.95,
+    cooldown: 1000,
+    damage: 10,
+    pellets: 11,
+    spread: 0.18,
+    kick: 1.15,
     mode: 'hitscan',
     color: '#8b7355',
-    accent: '#ff7a18',
+    accent: '#ff9a3c',
   },
   rocket: {
     id: 'rocket',
@@ -111,10 +112,10 @@ const weaponConfigs = Object.freeze({
     ammoPerPickup: 60,
     startAmmo: 60,
     maxAmmo: 200,
-    cooldown: 50,
-    damage: 7,
-    maxRange: 6.5,
-    kick: 0.2,
+    cooldown: 45,
+    damage: 8,
+    maxRange: 7.2,
+    kick: 0.35,
     mode: 'beam',
     color: '#3a4a6a',
     accent: '#9ad7ff',
@@ -150,6 +151,14 @@ const weaponConfigs = Object.freeze({
     accent: '#c084fc',
   },
 });
+const shotgunPelletPattern = Object.freeze([
+  0,
+  -0.035, 0.035,
+  -0.07, 0.07,
+  -0.11, 0.11,
+  -0.15, 0.15,
+  -0.05, 0.05,
+]);
 const weaponTileConfigs = Object.freeze({
   S: 'shotgun',
   O: 'rocket',
@@ -291,7 +300,7 @@ function createPlayerState() {
 function startGame() {
   isStarted = true;
   startButton.classList.add('is-hidden');
-  updateMessage('Стартовое оружие: MACHINE GUN. Подбирайте SG/RL/LG/RG/PG на карте');
+  updateMessage('Старт: LIGHT MACHINE GUN. Подбирайте SG / RL / LG(shaft) / RG / PG');
   if (!isTouchDevice()) {
     canvas.requestPointerLock();
   }
@@ -777,20 +786,53 @@ function fireCurrentWeapon() {
  * @returns {void}
  */
 function fireHitscanWeapon(weapon) {
-  const pelletCount = weapon.pellets || 1;
-  const spread = weapon.spread || 0;
-  for (let i = 0; i < pelletCount; i += 1) {
-    const angle = player.angle + (Math.random() - 0.5) * spread * 2;
-    const hit = castHitscan({ angle, maxDistance: maxRayDistance, pierce: false });
-    hit.hits.forEach(({ bot }) => applyBotDamage(bot, weapon.damage));
-    createParticles({
-      x: hit.x,
-      y: hit.y,
+  if (weapon.id === 'shotgun') {
+    fireShotgunWeapon(weapon);
+    return;
+  }
+  const angle = player.angle + (Math.random() - 0.5) * 0.03;
+  const hit = castHitscan({ angle, maxDistance: maxRayDistance, pierce: false });
+  hit.hits.forEach(({ bot }) => applyBotDamage(bot, weapon.damage));
+  createParticles({ x: hit.x, y: hit.y, color: weapon.accent, amount: 4 });
+  createParticles({ x: player.x, y: player.y, color: weapon.accent, amount: 3 });
+  if (weapon.tracer) {
+    beams.push({
+      type: 'tracer',
+      x1: player.x + Math.cos(player.angle) * 0.35,
+      y1: player.y + Math.sin(player.angle) * 0.35,
+      x2: hit.x,
+      y2: hit.y,
+      life: 0.05,
       color: weapon.accent,
-      amount: pelletCount > 1 ? 2 : 5,
     });
   }
-  createParticles({ x: player.x, y: player.y, color: weapon.accent, amount: 4 });
+}
+
+/**
+ * @param {typeof weaponConfigs.shotgun} weapon
+ * @returns {void}
+ */
+function fireShotgunWeapon(weapon) {
+  shotgunPelletPattern.forEach((offset, index) => {
+    const jitter = (Math.random() - 0.5) * 0.02;
+    const angle = player.angle + offset + jitter;
+    const hit = castHitscan({ angle, maxDistance: 12, pierce: false });
+    hit.hits.forEach(({ bot }) => applyBotDamage(bot, weapon.damage));
+    createParticles({ x: hit.x, y: hit.y, color: weapon.accent, amount: 2 });
+    if (index % 2 === 0) {
+      beams.push({
+        type: 'pellet',
+        x1: player.x + Math.cos(angle) * 0.4,
+        y1: player.y + Math.sin(angle) * 0.4,
+        x2: hit.x,
+        y2: hit.y,
+        life: 0.08,
+        color: '#ffd9a0',
+      });
+    }
+  });
+  createParticles({ x: player.x, y: player.y, color: weapon.accent, amount: 14 });
+  player.heightOffset = Math.min(0.18, player.heightOffset + 0.08);
 }
 
 /**
@@ -800,14 +842,23 @@ function fireHitscanWeapon(weapon) {
 function fireBeamWeapon(weapon) {
   const hit = castHitscan({ angle: player.angle, maxDistance: weapon.maxRange || 6, pierce: false });
   hit.hits.forEach(({ bot }) => applyBotDamage(bot, weapon.damage));
+  beams = beams.filter((beam) => beam.type !== 'lightning');
   beams.push({
     type: 'lightning',
-    x1: player.x,
-    y1: player.y,
+    x1: player.x + Math.cos(player.angle) * 0.45,
+    y1: player.y + Math.sin(player.angle) * 0.45,
     x2: hit.x,
     y2: hit.y,
-    life: 0.06,
+    life: 0.12,
     color: weapon.accent,
+    distance: hit.distance,
+  });
+  createParticles({ x: hit.x, y: hit.y, color: weapon.accent, amount: 6 });
+  createParticles({
+    x: player.x + Math.cos(player.angle) * 0.5,
+    y: player.y + Math.sin(player.angle) * 0.5,
+    color: '#ffffff',
+    amount: 3,
   });
 }
 
@@ -820,11 +871,11 @@ function fireRailWeapon(weapon) {
   hit.hits.forEach(({ bot }) => applyBotDamage(bot, weapon.damage));
   beams.push({
     type: 'rail',
-    x1: player.x,
-    y1: player.y,
+    x1: player.x + Math.cos(player.angle) * 0.4,
+    y1: player.y + Math.sin(player.angle) * 0.4,
     x2: hit.x,
     y2: hit.y,
-    life: 0.22,
+    life: 0.28,
     color: weapon.accent,
   });
   createParticles({ x: hit.x, y: hit.y, color: weapon.accent, amount: 16 });
@@ -1369,14 +1420,19 @@ function drawSprites({ width, height, depthBuffer }) {
  */
 function drawBeams({ width, height }) {
   beams.forEach((beam) => {
-    const start = projectWorldPoint({ x: beam.x1, y: beam.y1, width, height });
-    const end = projectWorldPoint({ x: beam.x2, y: beam.y2, width, height });
-    if (!start || !end) {
+    const end = projectWorldPoint({ x: beam.x2, y: beam.y2, width, height, minDistance: 0.01 });
+    const start = projectWorldPoint({ x: beam.x1, y: beam.y1, width, height, minDistance: 0.01 })
+      || { x: width * 0.58, y: height * 0.62 };
+    if (!end) {
+      return;
+    }
+    if (beam.type === 'lightning') {
+      drawLightningBeam({ start, end, color: beam.color, life: beam.life, width, height });
       return;
     }
     context.strokeStyle = beam.color;
-    context.lineWidth = beam.type === 'rail' ? 4 : 2;
-    context.globalAlpha = Math.max(0.25, beam.life * 4);
+    context.lineWidth = beam.type === 'rail' ? 5 : beam.type === 'pellet' ? 2 : 2;
+    context.globalAlpha = Math.max(0.2, Math.min(1, beam.life * 8));
     context.beginPath();
     context.moveTo(start.x, start.y);
     context.lineTo(end.x, end.y);
@@ -1386,18 +1442,69 @@ function drawBeams({ width, height }) {
 }
 
 /**
- * @param {{ x: number, y: number, width: number, height: number }} params
+ * @param {{ start: { x: number, y: number }, end: { x: number, y: number }, color: string, life: number, width: number, height: number }} params
+ * @returns {void}
+ */
+function drawLightningBeam({ start, end, color, life }) {
+  const segments = 10;
+  const alpha = Math.max(0.45, Math.min(1, life * 8));
+  context.save();
+  context.globalAlpha = alpha * 0.35;
+  context.strokeStyle = color;
+  context.lineWidth = 10;
+  context.beginPath();
+  context.moveTo(start.x, start.y);
+  context.lineTo(end.x, end.y);
+  context.stroke();
+  context.globalAlpha = alpha;
+  context.strokeStyle = '#ffffff';
+  context.lineWidth = 3;
+  context.beginPath();
+  context.moveTo(start.x, start.y);
+  for (let i = 1; i < segments; i += 1) {
+    const t = i / segments;
+    const x = start.x + (end.x - start.x) * t + (Math.random() - 0.5) * 18;
+    const y = start.y + (end.y - start.y) * t + (Math.random() - 0.5) * 18;
+    context.lineTo(x, y);
+  }
+  context.lineTo(end.x, end.y);
+  context.stroke();
+  context.strokeStyle = color;
+  context.lineWidth = 2;
+  context.beginPath();
+  context.moveTo(start.x, start.y);
+  for (let i = 1; i < segments; i += 1) {
+    const t = i / segments;
+    const x = start.x + (end.x - start.x) * t + (Math.random() - 0.5) * 10;
+    const y = start.y + (end.y - start.y) * t + (Math.random() - 0.5) * 10;
+    context.lineTo(x, y);
+  }
+  context.lineTo(end.x, end.y);
+  context.stroke();
+  context.fillStyle = 'rgb(154 215 255 / 55%)';
+  context.beginPath();
+  context.arc(start.x, start.y, 8 + Math.random() * 6, 0, Math.PI * 2);
+  context.fill();
+  context.beginPath();
+  context.arc(end.x, end.y, 6 + Math.random() * 5, 0, Math.PI * 2);
+  context.fill();
+  context.restore();
+}
+
+/**
+ * @param {{ x: number, y: number, width: number, height: number, minDistance?: number }} params
  * @returns {{ x: number, y: number } | null}
  */
-function projectWorldPoint({ x, y, width, height }) {
+function projectWorldPoint({ x, y, width, height, minDistance = 0.05 }) {
   const distance = getDistance({ ax: player.x, ay: player.y, bx: x, by: y });
   const angleToPoint = normalizeAngle(Math.atan2(y - player.y, x - player.x) - player.angle);
-  if (Math.abs(angleToPoint) > fieldOfView * 0.75 || distance < 0.05) {
+  if (Math.abs(angleToPoint) > fieldOfView * 0.8 || distance < minDistance) {
     return null;
   }
+  const depthScale = Math.min(1.2, 0.35 + distance * 0.12);
   return {
     x: width * 0.5 + Math.tan(angleToPoint) * (width / fieldOfView),
-    y: height * 0.5 - player.heightOffset * 16,
+    y: height * 0.5 - player.heightOffset * 16 + (1 - Math.min(distance, 8) / 8) * 18 * depthScale,
   };
 }
 
@@ -1696,10 +1803,16 @@ function drawWeapon({ width, height }) {
   } else {
     drawPlasmaGunModel({ scale, weapon });
   }
-  if (player.weaponKick > 0.05) {
-    context.fillStyle = `${weapon.accent}${Math.floor(Math.min(0.9, player.weaponKick) * 255).toString(16).padStart(2, '0')}`;
+  const isLightningFiring = weapon.id === 'lightning' && beams.some((beam) => beam.type === 'lightning');
+  if (player.weaponKick > 0.05 || isLightningFiring) {
+    const flashPower = isLightningFiring ? 0.9 : player.weaponKick;
+    context.fillStyle = `rgb(255 255 255 / ${Math.min(0.85, flashPower)})`;
     context.beginPath();
-    context.arc(scale * 88, -scale * 4, scale * 16 * player.weaponKick, 0, Math.PI * 2);
+    context.arc(scale * 88, -scale * 4, scale * (isLightningFiring ? 22 : 16) * flashPower, 0, Math.PI * 2);
+    context.fill();
+    context.fillStyle = `${weapon.accent}cc`;
+    context.beginPath();
+    context.arc(scale * 92, -scale * 2, scale * 10 * flashPower, 0, Math.PI * 2);
     context.fill();
   }
   context.restore();
@@ -1719,17 +1832,24 @@ function drawWeapon({ width, height }) {
  * @returns {void}
  */
 function drawMachineGunModel({ scale, weapon }) {
+  context.fillStyle = '#2a3140';
+  context.fillRect(-scale * 34, -scale * 12, scale * 48, scale * 30);
   context.fillStyle = weapon.color;
-  context.fillRect(-scale * 28, -scale * 14, scale * 70, scale * 28);
-  context.fillStyle = '#1a2233';
-  context.fillRect(scale * 30, -scale * 8, scale * 55, scale * 16);
-  context.fillStyle = weapon.accent;
-  context.fillRect(-scale * 10, -scale * 18, scale * 34, scale * 6);
+  context.fillRect(-scale * 18, -scale * 8, scale * 62, scale * 20);
   context.fillStyle = '#111827';
-  context.fillRect(-scale * 8, scale * 12, scale * 18, scale * 28);
+  context.fillRect(scale * 36, -scale * 6, scale * 62, scale * 12);
+  context.fillStyle = '#5a6478';
+  context.fillRect(scale * 90, -scale * 8, scale * 10, scale * 16);
+  context.fillStyle = weapon.accent;
+  context.fillRect(-scale * 8, -scale * 16, scale * 40, scale * 5);
+  for (let i = 0; i < 5; i += 1) {
+    context.fillRect(-scale * 28, -scale * 4 + i * scale * 4, scale * 10, scale * 2);
+  }
+  context.fillStyle = '#111827';
+  context.fillRect(-scale * 10, scale * 14, scale * 16, scale * 26);
   context.fillStyle = '#f5f7fb';
   context.font = `900 ${Math.max(8, scale * 7)}px Inter, sans-serif`;
-  context.fillText('MG', -scale * 8, scale * 4);
+  context.fillText('LMG', -scale * 12, scale * 4);
 }
 
 /**
@@ -1737,19 +1857,21 @@ function drawMachineGunModel({ scale, weapon }) {
  * @returns {void}
  */
 function drawShotgunModel({ scale, weapon }) {
-  context.fillStyle = weapon.color;
-  context.fillRect(-scale * 20, -scale * 10, scale * 55, scale * 24);
   context.fillStyle = '#3a2f28';
-  context.fillRect(scale * 28, -scale * 16, scale * 58, scale * 12);
-  context.fillRect(scale * 28, scale * 2, scale * 58, scale * 12);
+  context.fillRect(-scale * 24, -scale * 8, scale * 40, scale * 22);
+  context.fillStyle = weapon.color;
+  context.fillRect(scale * 10, -scale * 18, scale * 78, scale * 12);
+  context.fillRect(scale * 10, scale * 2, scale * 78, scale * 12);
+  context.fillStyle = '#1a1410';
+  context.fillRect(scale * 78, -scale * 20, scale * 14, scale * 16);
+  context.fillRect(scale * 78, scale * 0, scale * 14, scale * 16);
   context.fillStyle = weapon.accent;
-  context.fillRect(scale * 78, -scale * 18, scale * 10, scale * 16);
-  context.fillRect(scale * 78, scale * 0, scale * 10, scale * 16);
+  context.fillRect(scale * 20, -scale * 22, scale * 24, scale * 4);
   context.fillStyle = '#111827';
-  context.fillRect(-scale * 6, scale * 12, scale * 16, scale * 30);
+  context.fillRect(-scale * 4, scale * 12, scale * 18, scale * 30);
   context.fillStyle = '#f5f7fb';
   context.font = `900 ${Math.max(8, scale * 7)}px Inter, sans-serif`;
-  context.fillText('SG', -scale * 6, scale * 4);
+  context.fillText('SG', -scale * 4, scale * 4);
 }
 
 /**
@@ -1786,20 +1908,24 @@ function drawRocketLauncherModel({ scale, weapon }) {
  */
 function drawLightningGunModel({ scale, weapon }) {
   context.fillStyle = weapon.color;
-  context.fillRect(-scale * 24, -scale * 16, scale * 48, scale * 34);
+  context.fillRect(-scale * 28, -scale * 18, scale * 52, scale * 36);
   context.fillStyle = '#111827';
-  context.fillRect(scale * 18, -scale * 8, scale * 70, scale * 16);
+  context.fillRect(scale * 16, -scale * 10, scale * 62, scale * 20);
   context.fillStyle = weapon.accent;
+  context.fillRect(scale * 70, -scale * 14, scale * 22, scale * 28);
   context.beginPath();
-  context.moveTo(scale * 70, -scale * 18);
-  context.lineTo(scale * 92, scale * 0);
-  context.lineTo(scale * 70, scale * 18);
+  context.moveTo(scale * 88, -scale * 20);
+  context.lineTo(scale * 112, scale * 0);
+  context.lineTo(scale * 88, scale * 20);
   context.closePath();
   context.fill();
-  context.fillRect(-scale * 8, -scale * 20, scale * 24, scale * 5);
+  context.fillStyle = '#ffffff';
+  context.fillRect(scale * 78, -scale * 3, scale * 18, scale * 6);
+  context.fillStyle = weapon.accent;
+  context.fillRect(-scale * 10, -scale * 24, scale * 28, scale * 5);
   context.fillStyle = '#f5f7fb';
   context.font = `900 ${Math.max(8, scale * 7)}px Inter, sans-serif`;
-  context.fillText('LG', -scale * 8, scale * 4);
+  context.fillText('SHAFT', -scale * 16, scale * 4);
 }
 
 /**
